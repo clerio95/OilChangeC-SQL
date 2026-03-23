@@ -1,11 +1,10 @@
 #include "gui.h"
 
 #include <commctrl.h>
+#include <windowsx.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
-
-#pragma comment(lib, "comctl32.lib")
 
 extern LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam);
 
