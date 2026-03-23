@@ -11,20 +11,26 @@ extern LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lPara
 static HWND g_radio_oleos[64];
 static int g_qtd_radios = 0;
 
-static void formatar_data_br(const char* iso, char* out, size_t out_size) {
+static void formatar_data_br(const char *iso, char *out, size_t out_size)
+{
     int y, m, d;
-    if (iso == NULL || out == NULL || out_size == 0) {
+    if (iso == NULL || out == NULL || out_size == 0)
+    {
         return;
     }
 
-    if (sscanf(iso, "%4d-%2d-%2d", &y, &m, &d) == 3) {
+    if (sscanf(iso, "%4d-%2d-%2d", &y, &m, &d) == 3)
+    {
         snprintf(out, out_size, "%02d/%02d/%04d", d, m, y);
-    } else {
+    }
+    else
+    {
         snprintf(out, out_size, "%s", iso);
     }
 }
 
-HMENU criar_menu_principal(void) {
+HMENU criar_menu_principal(void)
+{
     HMENU hMenu = CreateMenu();
     HMENU hArquivo = CreatePopupMenu();
     HMENU hRel = CreatePopupMenu();
@@ -49,7 +55,8 @@ HMENU criar_menu_principal(void) {
     return hMenu;
 }
 
-HWND criar_janela_principal(HINSTANCE hInstance, int nCmdShow) {
+HWND criar_janela_principal(HINSTANCE hInstance, int nCmdShow)
+{
     WNDCLASS wc;
     HWND hwnd;
 
@@ -74,10 +81,10 @@ HWND criar_janela_principal(HINSTANCE hInstance, int nCmdShow) {
         NULL,
         criar_menu_principal(),
         hInstance,
-        NULL
-    );
+        NULL);
 
-    if (hwnd != NULL) {
+    if (hwnd != NULL)
+    {
         ShowWindow(hwnd, nCmdShow);
         UpdateWindow(hwnd);
     }
@@ -85,7 +92,8 @@ HWND criar_janela_principal(HINSTANCE hInstance, int nCmdShow) {
     return hwnd;
 }
 
-void criar_controles(HWND hwnd) {
+void criar_controles(HWND hwnd)
+{
     HWND hList;
     LVCOLUMN col;
     INITCOMMONCONTROLSEX icc;
@@ -95,7 +103,7 @@ void criar_controles(HWND hwnd) {
     InitCommonControlsEx(&icc);
 
     CreateWindow("BUTTON", "Cadastro de Troca", WS_CHILD | WS_VISIBLE | BS_GROUPBOX,
-                 15, 10, 940, 250, hwnd, NULL, NULL, NULL);
+                 15, 10, 940, 270, hwnd, NULL, NULL, NULL);
 
     CreateWindow("STATIC", "Placa do Veiculo:", WS_CHILD | WS_VISIBLE,
                  30, 40, 140, 20, hwnd, NULL, NULL, NULL);
@@ -107,51 +115,60 @@ void criar_controles(HWND hwnd) {
     CreateWindow("STATIC", "Tipo de Oleo:", WS_CHILD | WS_VISIBLE,
                  30, 74, 120, 20, hwnd, NULL, NULL, NULL);
 
-    CreateWindow("BUTTON", "Informar Telefone", WS_CHILD | WS_VISIBLE | BS_AUTOCHECKBOX,
-                 30, 128, 150, 22, hwnd, (HMENU)IDC_CHECK_TELEFONE, NULL, NULL);
+    CreateWindow("STATIC", "Gerenciar tipos:", WS_CHILD | WS_VISIBLE,
+                 620, 120, 120, 20, hwnd, NULL, NULL, NULL);
     CreateWindow("EDIT", "", WS_CHILD | WS_VISIBLE | WS_BORDER | ES_AUTOHSCROLL,
-                 190, 126, 150, 24, hwnd, (HMENU)IDC_EDIT_TELEFONE, NULL, NULL);
+                 620, 142, 200, 24, hwnd, (HMENU)IDC_EDIT_NOVO_OLEO, NULL, NULL);
+    CreateWindow("BUTTON", "Adicionar tipo", WS_CHILD | WS_VISIBLE | BS_PUSHBUTTON,
+                 830, 142, 100, 24, hwnd, (HMENU)IDC_BUTTON_ADICIONAR_OLEO, NULL, NULL);
+    CreateWindow("BUTTON", "Remover tipo selecionado", WS_CHILD | WS_VISIBLE | BS_PUSHBUTTON,
+                 620, 172, 310, 24, hwnd, (HMENU)IDC_BUTTON_REMOVER_OLEO, NULL, NULL);
+
+    CreateWindow("BUTTON", "Informar Telefone", WS_CHILD | WS_VISIBLE | BS_AUTOCHECKBOX,
+                 30, 164, 150, 22, hwnd, (HMENU)IDC_CHECK_TELEFONE, NULL, NULL);
+    CreateWindow("EDIT", "", WS_CHILD | WS_VISIBLE | WS_BORDER | ES_AUTOHSCROLL,
+                 190, 162, 150, 24, hwnd, (HMENU)IDC_EDIT_TELEFONE, NULL, NULL);
     EnableWindow(GetDlgItem(hwnd, IDC_EDIT_TELEFONE), FALSE);
 
     CreateWindow("BUTTON", "Veio por indicacao", WS_CHILD | WS_VISIBLE | BS_AUTOCHECKBOX,
-                 30, 158, 170, 22, hwnd, (HMENU)IDC_CHECK_INDICACAO, NULL, NULL);
+                 30, 194, 170, 22, hwnd, (HMENU)IDC_CHECK_INDICACAO, NULL, NULL);
 
     CreateWindow("STATIC", "Data da Troca:", WS_CHILD | WS_VISIBLE,
-                 30, 190, 120, 20, hwnd, NULL, NULL, NULL);
+                 30, 226, 120, 20, hwnd, NULL, NULL, NULL);
     CreateWindow(DATETIMEPICK_CLASS, "", WS_CHILD | WS_VISIBLE | DTS_SHORTDATEFORMAT,
-                 170, 186, 130, 24, hwnd, (HMENU)IDC_DATETIME_TROCA, NULL, NULL);
+                 170, 222, 130, 24, hwnd, (HMENU)IDC_DATETIME_TROCA, NULL, NULL);
 
     CreateWindow("BUTTON", "Salvar", WS_CHILD | WS_VISIBLE | BS_PUSHBUTTON,
-                 500, 38, 100, 30, hwnd, (HMENU)IDC_BUTTON_SALVAR, NULL, NULL);
+                 620, 38, 100, 30, hwnd, (HMENU)IDC_BUTTON_SALVAR, NULL, NULL);
     CreateWindow("BUTTON", "Atualizar", WS_CHILD | WS_VISIBLE | BS_PUSHBUTTON,
-                 610, 38, 100, 30, hwnd, (HMENU)IDC_BUTTON_ATUALIZAR, NULL, NULL);
+                 730, 38, 100, 30, hwnd, (HMENU)IDC_BUTTON_ATUALIZAR, NULL, NULL);
     EnableWindow(GetDlgItem(hwnd, IDC_BUTTON_ATUALIZAR), FALSE);
     CreateWindow("BUTTON", "Limpar", WS_CHILD | WS_VISIBLE | BS_PUSHBUTTON,
-                 720, 38, 100, 30, hwnd, (HMENU)IDC_BUTTON_LIMPAR, NULL, NULL);
+                 840, 38, 90, 30, hwnd, (HMENU)IDC_BUTTON_LIMPAR, NULL, NULL);
     CreateWindow("BUTTON", "Deletar", WS_CHILD | WS_VISIBLE | BS_PUSHBUTTON,
-                 830, 38, 100, 30, hwnd, (HMENU)IDC_BUTTON_DELETAR, NULL, NULL);
+                 620, 74, 100, 30, hwnd, (HMENU)IDC_BUTTON_DELETAR, NULL, NULL);
     CreateWindow("BUTTON", "Editar selecionado", WS_CHILD | WS_VISIBLE | BS_PUSHBUTTON,
-                 500, 74, 150, 30, hwnd, (HMENU)IDC_BUTTON_EDITAR, NULL, NULL);
+                 730, 74, 200, 30, hwnd, (HMENU)IDC_BUTTON_EDITAR, NULL, NULL);
 
     CreateWindow("BUTTON", "Registros Cadastrados", WS_CHILD | WS_VISIBLE | BS_GROUPBOX,
-                 15, 270, 940, 380, hwnd, NULL, NULL, NULL);
+                 15, 290, 940, 360, hwnd, NULL, NULL, NULL);
 
     CreateWindow("STATIC", "Buscar:", WS_CHILD | WS_VISIBLE,
-                 30, 300, 50, 20, hwnd, NULL, NULL, NULL);
+                 30, 320, 50, 20, hwnd, NULL, NULL, NULL);
     CreateWindow("EDIT", "", WS_CHILD | WS_VISIBLE | WS_BORDER | ES_AUTOHSCROLL,
-                 90, 298, 150, 24, hwnd, (HMENU)IDC_EDIT_BUSCA, NULL, NULL);
+                 90, 318, 150, 24, hwnd, (HMENU)IDC_EDIT_BUSCA, NULL, NULL);
     CreateWindow("BUTTON", "Pesquisar", WS_CHILD | WS_VISIBLE | BS_PUSHBUTTON,
-                 250, 298, 90, 24, hwnd, (HMENU)IDC_BUTTON_PESQUISAR, NULL, NULL);
+                 250, 318, 90, 24, hwnd, (HMENU)IDC_BUTTON_PESQUISAR, NULL, NULL);
 
     CreateWindow("BUTTON", "Todas", WS_CHILD | WS_VISIBLE | BS_AUTORADIOBUTTON,
-                 360, 300, 90, 20, hwnd, (HMENU)IDC_RADIO_EXIBIR_TODAS, NULL, NULL);
+                 360, 320, 90, 20, hwnd, (HMENU)IDC_RADIO_EXIBIR_TODAS, NULL, NULL);
     CreateWindow("BUTTON", "Ultima por veiculo", WS_CHILD | WS_VISIBLE | BS_AUTORADIOBUTTON,
-                 460, 300, 150, 20, hwnd, (HMENU)IDC_RADIO_EXIBIR_ULTIMA, NULL, NULL);
+                 460, 320, 150, 20, hwnd, (HMENU)IDC_RADIO_EXIBIR_ULTIMA, NULL, NULL);
     SendMessage(GetDlgItem(hwnd, IDC_RADIO_EXIBIR_TODAS), BM_SETCHECK, BST_CHECKED, 0);
 
     hList = CreateWindow(WC_LISTVIEW, "",
                          WS_CHILD | WS_VISIBLE | LVS_REPORT | LVS_SINGLESEL | WS_BORDER,
-                         30, 330, 900, 260,
+                         30, 350, 900, 240,
                          hwnd, (HMENU)IDC_LISTVIEW_REGISTROS, NULL, NULL);
 
     ListView_SetExtendedListViewStyle(hList, LVS_EX_FULLROWSELECT | LVS_EX_GRIDLINES);
@@ -159,53 +176,63 @@ void criar_controles(HWND hwnd) {
     ZeroMemory(&col, sizeof(col));
     col.mask = LVCF_WIDTH | LVCF_TEXT | LVCF_SUBITEM;
 
-    col.cx = 60; col.pszText = "ID";
+    col.cx = 60;
+    col.pszText = "ID";
     ListView_InsertColumn(hList, 0, &col);
-    col.cx = 120; col.pszText = "Placa";
+    col.cx = 120;
+    col.pszText = "Placa";
     ListView_InsertColumn(hList, 1, &col);
-    col.cx = 150; col.pszText = "Oleo";
+    col.cx = 150;
+    col.pszText = "Oleo";
     ListView_InsertColumn(hList, 2, &col);
-    col.cx = 90; col.pszText = "Telefone";
+    col.cx = 140;
+    col.pszText = "Telefone";
     ListView_InsertColumn(hList, 3, &col);
-    col.cx = 90; col.pszText = "Indicacao";
+    col.cx = 90;
+    col.pszText = "Indicacao";
     ListView_InsertColumn(hList, 4, &col);
-    col.cx = 150; col.pszText = "Data";
+    col.cx = 150;
+    col.pszText = "Data";
     ListView_InsertColumn(hList, 5, &col);
 
     CreateWindow("BUTTON", "Ver Historico Completo", WS_CHILD | WS_VISIBLE | BS_PUSHBUTTON,
-                 760, 298, 170, 24, hwnd, (HMENU)IDC_BUTTON_VER_HISTORICO_COMPLETO, NULL, NULL);
+                 760, 318, 170, 24, hwnd, (HMENU)IDC_BUTTON_VER_HISTORICO_COMPLETO, NULL, NULL);
 }
 
-void criar_radio_buttons_oleo(HWND hwnd, TipoOleo* tipos, int count) {
+void criar_radio_buttons_oleo(HWND hwnd, TipoOleo *tipos, int count)
+{
     int i;
     int x = 170;
     int y = 74;
 
-    for (i = 0; i < g_qtd_radios; i++) {
-        if (g_radio_oleos[i] != NULL) {
+    for (i = 0; i < g_qtd_radios; i++)
+    {
+        if (g_radio_oleos[i] != NULL)
+        {
             DestroyWindow(g_radio_oleos[i]);
             g_radio_oleos[i] = NULL;
         }
     }
     g_qtd_radios = 0;
 
-    for (i = 0; i < count && i < 64; i++) {
+    for (i = 0; i < count && i < 64; i++)
+    {
         g_radio_oleos[i] = CreateWindow(
             "BUTTON",
             tipos[i].nome,
             WS_CHILD | WS_VISIBLE | BS_AUTORADIOBUTTON,
             x,
             y,
-            130,
+            120,
             20,
             hwnd,
             (HMENU)(INT_PTR)(IDC_RADIO_OLEO_BASE + i),
             NULL,
-            NULL
-        );
+            NULL);
 
-        x += 140;
-        if (x > 580) {
+        x += 130;
+        if (x >= 560)
+        {
             x = 170;
             y += 24;
         }
@@ -213,23 +240,27 @@ void criar_radio_buttons_oleo(HWND hwnd, TipoOleo* tipos, int count) {
 
     g_qtd_radios = (count < 64) ? count : 64;
 
-    if (g_qtd_radios > 0 && g_radio_oleos[0] != NULL) {
+    if (g_qtd_radios > 0 && g_radio_oleos[0] != NULL)
+    {
         SendMessage(g_radio_oleos[0], BM_SETCHECK, BST_CHECKED, 0);
     }
 }
 
-void recarregar_tipos_oleo(HWND hwnd) {
+void recarregar_tipos_oleo(HWND hwnd)
+{
     int count = 0;
-    TipoOleo* tipos = db_listar_tipos_oleo(&count);
+    TipoOleo *tipos = db_listar_tipos_oleo(&count);
 
-    if (tipos != NULL && count > 0) {
+    if (tipos != NULL && count > 0)
+    {
         criar_radio_buttons_oleo(hwnd, tipos, count);
     }
 
     db_liberar_tipos(tipos);
 }
 
-void limpar_formulario(HWND hwnd) {
+void limpar_formulario(HWND hwnd)
+{
     SYSTEMTIME st;
     int i;
 
@@ -239,10 +270,12 @@ void limpar_formulario(HWND hwnd) {
     Button_SetCheck(GetDlgItem(hwnd, IDC_CHECK_INDICACAO), BST_UNCHECKED);
     EnableWindow(GetDlgItem(hwnd, IDC_EDIT_TELEFONE), FALSE);
 
-    for (i = 0; i < g_qtd_radios; i++) {
+    for (i = 0; i < g_qtd_radios; i++)
+    {
         Button_SetCheck(g_radio_oleos[i], BST_UNCHECKED);
     }
-    if (g_qtd_radios > 0) {
+    if (g_qtd_radios > 0)
+    {
         Button_SetCheck(g_radio_oleos[0], BST_CHECKED);
     }
 
@@ -253,10 +286,12 @@ void limpar_formulario(HWND hwnd) {
     EnableWindow(GetDlgItem(hwnd, IDC_BUTTON_ATUALIZAR), FALSE);
 }
 
-void preencher_formulario(HWND hwnd, const TrocaOleo* troca) {
+void preencher_formulario(HWND hwnd, const TrocaOleo *troca)
+{
     int i;
 
-    if (troca == NULL) {
+    if (troca == NULL)
+    {
         return;
     }
 
@@ -268,7 +303,8 @@ void preencher_formulario(HWND hwnd, const TrocaOleo* troca) {
 
     Button_SetCheck(GetDlgItem(hwnd, IDC_CHECK_INDICACAO), troca->veio_indicacao ? BST_CHECKED : BST_UNCHECKED);
 
-    for (i = 0; i < g_qtd_radios; i++) {
+    for (i = 0; i < g_qtd_radios; i++)
+    {
         char txt[64];
         GetWindowText(g_radio_oleos[i], txt, (int)sizeof(txt));
         Button_SetCheck(g_radio_oleos[i], strcmp(txt, troca->tipo_oleo) == 0 ? BST_CHECKED : BST_UNCHECKED);
@@ -278,7 +314,8 @@ void preencher_formulario(HWND hwnd, const TrocaOleo* troca) {
     EnableWindow(GetDlgItem(hwnd, IDC_BUTTON_ATUALIZAR), TRUE);
 }
 
-TrocaOleo obter_dados_formulario(HWND hwnd) {
+TrocaOleo obter_dados_formulario(HWND hwnd)
+{
     TrocaOleo t;
     SYSTEMTIME st;
     int i;
@@ -287,15 +324,18 @@ TrocaOleo obter_dados_formulario(HWND hwnd) {
 
     GetWindowText(GetDlgItem(hwnd, IDC_EDIT_PLACA), t.placa, (int)sizeof(t.placa));
 
-    for (i = 0; i < g_qtd_radios; i++) {
-        if (Button_GetCheck(g_radio_oleos[i]) == BST_CHECKED) {
+    for (i = 0; i < g_qtd_radios; i++)
+    {
+        if (Button_GetCheck(g_radio_oleos[i]) == BST_CHECKED)
+        {
             GetWindowText(g_radio_oleos[i], t.tipo_oleo, (int)sizeof(t.tipo_oleo));
             break;
         }
     }
 
     t.telefone_informado = (Button_GetCheck(GetDlgItem(hwnd, IDC_CHECK_TELEFONE)) == BST_CHECKED) ? 1 : 0;
-    if (t.telefone_informado) {
+    if (t.telefone_informado)
+    {
         GetWindowText(GetDlgItem(hwnd, IDC_EDIT_TELEFONE), t.telefone, (int)sizeof(t.telefone));
     }
 
@@ -309,20 +349,29 @@ TrocaOleo obter_dados_formulario(HWND hwnd) {
     return t;
 }
 
-void atualizar_listview(HWND hwndList, TrocaOleo* trocas, int count) {
+void atualizar_listview(HWND hwndList, TrocaOleo *trocas, int count)
+{
     int i;
     LVITEM item;
 
     ListView_DeleteAllItems(hwndList);
 
-    for (i = 0; i < count; i++) {
+    for (i = 0; i < count; i++)
+    {
         char buf_id[32];
-        char tel_info[8];
+        char tel_info[32];
         char indic[8];
         char data_br[32];
 
         snprintf(buf_id, sizeof(buf_id), "%d", trocas[i].id);
-        snprintf(tel_info, sizeof(tel_info), "%s", trocas[i].telefone_informado ? "Sim" : "Nao");
+        if (trocas[i].telefone_informado && trocas[i].telefone[0] != '\0')
+        {
+            snprintf(tel_info, sizeof(tel_info), "%s", trocas[i].telefone);
+        }
+        else
+        {
+            snprintf(tel_info, sizeof(tel_info), "-");
+        }
         snprintf(indic, sizeof(indic), "%s", trocas[i].veio_indicacao ? "Sim" : "Nao");
         formatar_data_br(trocas[i].data_troca, data_br, sizeof(data_br));
 
@@ -342,11 +391,13 @@ void atualizar_listview(HWND hwndList, TrocaOleo* trocas, int count) {
     }
 }
 
-int obter_id_item_selecionado(HWND hwndList) {
+int obter_id_item_selecionado(HWND hwndList)
+{
     int idx = ListView_GetNextItem(hwndList, -1, LVNI_SELECTED);
     LVITEM item;
 
-    if (idx < 0) {
+    if (idx < 0)
+    {
         return -1;
     }
 
@@ -354,36 +405,66 @@ int obter_id_item_selecionado(HWND hwndList) {
     item.mask = LVIF_PARAM;
     item.iItem = idx;
 
-    if (!ListView_GetItem(hwndList, &item)) {
+    if (!ListView_GetItem(hwndList, &item))
+    {
         return -1;
     }
 
     return (int)item.lParam;
 }
 
-TrocaOleo* obter_item_selecionado(HWND hwndList) {
+int obter_nome_tipo_oleo_selecionado(char *nome, int nome_size)
+{
+    int i;
+
+    if (nome == NULL || nome_size <= 0)
+    {
+        return 0;
+    }
+
+    nome[0] = '\0';
+
+    for (i = 0; i < g_qtd_radios; i++)
+    {
+        if (Button_GetCheck(g_radio_oleos[i]) == BST_CHECKED)
+        {
+            GetWindowText(g_radio_oleos[i], nome, nome_size);
+            return nome[0] != '\0';
+        }
+    }
+
+    return 0;
+}
+
+TrocaOleo *obter_item_selecionado(HWND hwndList)
+{
     int id = obter_id_item_selecionado(hwndList);
-    if (id < 0) {
+    if (id < 0)
+    {
         return NULL;
     }
     return db_buscar_troca_por_id(id);
 }
 
-void mostrar_erro(HWND hwnd, const char* mensagem) {
+void mostrar_erro(HWND hwnd, const char *mensagem)
+{
     MessageBox(hwnd, mensagem, "Erro", MB_OK | MB_ICONERROR);
 }
 
-void mostrar_sucesso(HWND hwnd, const char* mensagem) {
+void mostrar_sucesso(HWND hwnd, const char *mensagem)
+{
     MessageBox(hwnd, mensagem, "Sucesso", MB_OK | MB_ICONINFORMATION);
 }
 
-int confirmar_acao(HWND hwnd, const char* mensagem) {
+int confirmar_acao(HWND hwnd, const char *mensagem)
+{
     return MessageBox(hwnd, mensagem, "Confirmacao", MB_YESNO | MB_ICONQUESTION) == IDYES;
 }
 
-void mostrar_info_historico(HWND hwnd, const char* placa, int total_trocas,
-                            const char* primeira, const char* ultima,
-                            const char* oleo_favorito, int intervalo_dias) {
+void mostrar_info_historico(HWND hwnd, const char *placa, int total_trocas,
+                            const char *primeira, const char *ultima,
+                            const char *oleo_favorito, int intervalo_dias)
+{
     char msg[1024];
     char p1[32];
     char p2[32];
@@ -408,14 +489,16 @@ void mostrar_info_historico(HWND hwnd, const char* placa, int total_trocas,
     MessageBox(hwnd, msg, "Historico do Veiculo", MB_OK | MB_ICONINFORMATION);
 }
 
-void abrir_janela_historico(HWND hwndParent, const char* placa) {
+void abrir_janela_historico(HWND hwndParent, const char *placa)
+{
     int total;
     int intervalo;
-    char* primeira;
-    char* ultima;
-    char* favorito;
+    char *primeira;
+    char *ultima;
+    char *favorito;
 
-    if (placa == NULL || placa[0] == '\0') {
+    if (placa == NULL || placa[0] == '\0')
+    {
         mostrar_erro(hwndParent, "Informe ou selecione uma placa para ver o historico.");
         return;
     }
@@ -437,7 +520,8 @@ void abrir_janela_historico(HWND hwndParent, const char* placa) {
     free(favorito);
 }
 
-void abrir_janela_relatorio_geral(HWND hwndParent) {
+void abrir_janela_relatorio_geral(HWND hwndParent)
+{
     int total_veiculos = db_total_veiculos_cadastrados();
     int total_trocas = db_total_trocas_realizadas();
     char msg[512];

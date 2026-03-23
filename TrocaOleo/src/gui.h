@@ -22,6 +22,9 @@
 #define IDC_LISTVIEW_REGISTROS 1600
 #define IDC_BUTTON_VER_HISTORICO_COMPLETO 1601
 #define IDC_BUTTON_EDITAR 1602
+#define IDC_EDIT_NOVO_OLEO 1700
+#define IDC_BUTTON_ADICIONAR_OLEO 1701
+#define IDC_BUTTON_REMOVER_OLEO 1702
 
 #define IDM_CONFIG_BD 2001
 #define IDM_CONFIG_OLEOS 2002
@@ -32,26 +35,27 @@
 
 HWND criar_janela_principal(HINSTANCE hInstance, int nCmdShow);
 void criar_controles(HWND hwnd);
-void criar_radio_buttons_oleo(HWND hwnd, TipoOleo* tipos, int count);
+void criar_radio_buttons_oleo(HWND hwnd, TipoOleo *tipos, int count);
 void recarregar_tipos_oleo(HWND hwnd);
 
 void limpar_formulario(HWND hwnd);
-void preencher_formulario(HWND hwnd, const TrocaOleo* troca);
+void preencher_formulario(HWND hwnd, const TrocaOleo *troca);
 TrocaOleo obter_dados_formulario(HWND hwnd);
 
-void atualizar_listview(HWND hwndList, TrocaOleo* trocas, int count);
-TrocaOleo* obter_item_selecionado(HWND hwndList);
+void atualizar_listview(HWND hwndList, TrocaOleo *trocas, int count);
+TrocaOleo *obter_item_selecionado(HWND hwndList);
 int obter_id_item_selecionado(HWND hwndList);
+int obter_nome_tipo_oleo_selecionado(char *nome, int nome_size);
 
-void abrir_janela_historico(HWND hwndParent, const char* placa);
+void abrir_janela_historico(HWND hwndParent, const char *placa);
 void abrir_janela_relatorio_geral(HWND hwndParent);
 
-void mostrar_erro(HWND hwnd, const char* mensagem);
-void mostrar_sucesso(HWND hwnd, const char* mensagem);
-int confirmar_acao(HWND hwnd, const char* mensagem);
-void mostrar_info_historico(HWND hwnd, const char* placa, int total_trocas,
-                            const char* primeira, const char* ultima,
-                            const char* oleo_favorito, int intervalo_dias);
+void mostrar_erro(HWND hwnd, const char *mensagem);
+void mostrar_sucesso(HWND hwnd, const char *mensagem);
+int confirmar_acao(HWND hwnd, const char *mensagem);
+void mostrar_info_historico(HWND hwnd, const char *placa, int total_trocas,
+                            const char *primeira, const char *ultima,
+                            const char *oleo_favorito, int intervalo_dias);
 
 HMENU criar_menu_principal(void);
 

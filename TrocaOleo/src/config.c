@@ -5,8 +5,10 @@
 #include <stdlib.h>
 #include <string.h>
 
-static void config_defaults(Config* config) {
-    if (config == NULL) {
+static void config_defaults(Config *config)
+{
+    if (config == NULL)
+    {
         return;
     }
 
@@ -17,46 +19,62 @@ static void config_defaults(Config* config) {
     snprintf(config->pasta_backup, sizeof(config->pasta_backup), "C:\\TrocaOleo\\Backups");
 }
 
-static void trim_line(char* line) {
+static void trim_line(char *line)
+{
     size_t len;
-    if (line == NULL) {
+    if (line == NULL)
+    {
         return;
     }
 
     len = strlen(line);
-    while (len > 0 && (line[len - 1] == '\n' || line[len - 1] == '\r' || line[len - 1] == ' ' || line[len - 1] == '\t')) {
+    while (len > 0 && (line[len - 1] == '\n' || line[len - 1] == '\r' || line[len - 1] == ' ' || line[len - 1] == '\t'))
+    {
         line[len - 1] = '\0';
         len--;
     }
 }
 
-int config_carregar(const char* config_path, Config* config) {
-    FILE* f;
+int config_carregar(const char *config_path, Config *config)
+{
+    FILE *f;
     char line[512];
 
-    if (config == NULL || config_path == NULL) {
+    if (config == NULL || config_path == NULL)
+    {
         return -1;
     }
 
     config_defaults(config);
 
     f = fopen(config_path, "r");
-    if (f == NULL) {
+    if (f == NULL)
+    {
         return config_salvar(config_path, config);
     }
 
-    while (fgets(line, sizeof(line), f) != NULL) {
+    while (fgets(line, sizeof(line), f) != NULL)
+    {
         trim_line(line);
 
-        if (strncmp(line, "caminho=", 8) == 0) {
+        if (strncmp(line, "caminho=", 8) == 0)
+        {
             snprintf(config->caminho_bd, sizeof(config->caminho_bd), "%s", line + 8);
-        } else if (strncmp(line, "tema=", 5) == 0) {
+        }
+        else if (strncmp(line, "tema=", 5) == 0)
+        {
             snprintf(config->tema, sizeof(config->tema), "%s", line + 5);
-        } else if (strncmp(line, "fonte_tamanho=", 14) == 0) {
+        }
+        else if (strncmp(line, "fonte_tamanho=", 14) == 0)
+        {
             config->fonte_tamanho = atoi(line + 14);
-        } else if (strncmp(line, "auto_backup=", 12) == 0) {
+        }
+        else if (strncmp(line, "auto_backup=", 12) == 0)
+        {
             config->auto_backup = atoi(line + 12);
-        } else if (strncmp(line, "pasta_backup=", 13) == 0) {
+        }
+        else if (strncmp(line, "pasta_backup=", 13) == 0)
+        {
             snprintf(config->pasta_backup, sizeof(config->pasta_backup), "%s", line + 13);
         }
     }
@@ -65,15 +83,18 @@ int config_carregar(const char* config_path, Config* config) {
     return 0;
 }
 
-int config_salvar(const char* config_path, const Config* config) {
-    FILE* f;
+int config_salvar(const char *config_path, const Config *config)
+{
+    FILE *f;
 
-    if (config == NULL || config_path == NULL) {
+    if (config == NULL || config_path == NULL)
+    {
         return -1;
     }
 
     f = fopen(config_path, "w");
-    if (f == NULL) {
+    if (f == NULL)
+    {
         return -1;
     }
 
@@ -92,12 +113,14 @@ int config_salvar(const char* config_path, const Config* config) {
     return 0;
 }
 
-void config_abrir_dialogo(HWND hwndParent, Config* config, const char* config_path) {
+int config_abrir_dialogo(HWND hwndParent, Config *config, const char *config_path)
+{
     OPENFILENAME ofn;
     char fileName[MAX_PATH];
 
-    if (config == NULL || config_path == NULL) {
-        return;
+    if (config == NULL || config_path == NULL)
+    {
+        return 0;
     }
 
     ZeroMemory(&ofn, sizeof(ofn));
@@ -112,18 +135,21 @@ void config_abrir_dialogo(HWND hwndParent, Config* config, const char* config_pa
     ofn.lpstrDefExt = "db";
     ofn.Flags = OFN_PATHMUSTEXIST | OFN_OVERWRITEPROMPT;
 
-    if (GetSaveFileName(&ofn)) {
+    if (GetSaveFileName(&ofn))
+    {
         snprintf(config->caminho_bd, sizeof(config->caminho_bd), "%s", fileName);
-        if (config_salvar(config_path, config) == 0) {
-            MessageBox(hwndParent,
-                       "Caminho do banco atualizado. Reinicie o aplicativo para reconectar.",
-                       "Configuracoes",
-                       MB_OK | MB_ICONINFORMATION);
-        } else {
+        if (config_salvar(config_path, config) == 0)
+        {
+            return 1;
+        }
+        else
+        {
             MessageBox(hwndParent,
                        "Nao foi possivel salvar o arquivo config.ini.",
                        "Erro",
                        MB_OK | MB_ICONERROR);
         }
     }
+
+    return 0;
 }
