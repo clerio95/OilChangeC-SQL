@@ -133,6 +133,8 @@ static int criar_diretorios_para_arquivo(const char *caminho_arquivo)
 {
     char pasta[MAX_PATH];
     size_t i;
+    size_t inicio;
+    int separadores;
 
     if (caminho_arquivo == NULL || caminho_arquivo[0] == '\0')
     {
@@ -155,7 +157,30 @@ static int criar_diretorios_para_arquivo(const char *caminho_arquivo)
         return 0;
     }
 
-    for (i = 3; pasta[i] != '\0'; i++)
+    /* Caminho UNC (\\servidor\compartilhamento\...): pular servidor e share */
+    if (pasta[0] == '\\' && pasta[1] == '\\')
+    {
+        separadores = 0;
+        for (inicio = 2; pasta[inicio] != '\0'; inicio++)
+        {
+            if (pasta[inicio] == '\\' || pasta[inicio] == '/')
+            {
+                separadores++;
+                if (separadores == 2)
+                {
+                    inicio++;
+                    break;
+                }
+            }
+        }
+    }
+    else
+    {
+        /* Caminho local (ex: C:\...) */
+        inicio = 3;
+    }
+
+    for (i = inicio; pasta[i] != '\0'; i++)
     {
         if (pasta[i] == '\\' || pasta[i] == '/')
         {
