@@ -3,6 +3,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <windows.h>
 
 static sqlite3 *g_db = NULL;
 
@@ -139,6 +140,8 @@ static TrocaOleo *listar_trocas_por_sql(const char *sql, const char *filtro, int
 
 int db_init(const char *db_path)
 {
+    wchar_t wpath[MAX_PATH];
+
     if (db_path == NULL)
     {
         return -1;
@@ -149,7 +152,13 @@ int db_init(const char *db_path)
         return 0;
     }
 
-    if (sqlite3_open(db_path, &g_db) != SQLITE_OK)
+    /* Converter caminho ANSI para wide char (UTF-16) para suportar acentos */
+    if (MultiByteToWideChar(CP_ACP, 0, db_path, -1, wpath, MAX_PATH) == 0)
+    {
+        return -1;
+    }
+
+    if (sqlite3_open16(wpath, &g_db) != SQLITE_OK)
     {
         if (g_db != NULL)
         {

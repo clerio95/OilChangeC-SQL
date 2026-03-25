@@ -131,39 +131,46 @@ static void trim_texto(char *s)
 
 static int criar_diretorios_para_arquivo(const char *caminho_arquivo)
 {
-    char pasta[MAX_PATH];
+    wchar_t wpasta[MAX_PATH];
     size_t i;
     size_t inicio;
     int separadores;
+    int len;
 
     if (caminho_arquivo == NULL || caminho_arquivo[0] == '\0')
     {
         return -1;
     }
 
-    snprintf(pasta, sizeof(pasta), "%s", caminho_arquivo);
-
-    for (i = strlen(pasta); i > 0; i--)
+    /* Converter ANSI para wide char para suportar acentos em caminhos de rede */
+    len = MultiByteToWideChar(CP_ACP, 0, caminho_arquivo, -1, wpasta, MAX_PATH);
+    if (len == 0)
     {
-        if (pasta[i] == '\\' || pasta[i] == '/')
+        return -1;
+    }
+
+    /* Remover nome do arquivo, manter so a pasta */
+    for (i = wcslen(wpasta); i > 0; i--)
+    {
+        if (wpasta[i] == L'\\' || wpasta[i] == L'/')
         {
-            pasta[i] = '\0';
+            wpasta[i] = L'\0';
             break;
         }
     }
 
-    if (pasta[0] == '\0')
+    if (wpasta[0] == L'\0')
     {
         return 0;
     }
 
     /* Caminho UNC (\\servidor\compartilhamento\...): pular servidor e share */
-    if (pasta[0] == '\\' && pasta[1] == '\\')
+    if (wpasta[0] == L'\\' && wpasta[1] == L'\\')
     {
         separadores = 0;
-        for (inicio = 2; pasta[inicio] != '\0'; inicio++)
+        for (inicio = 2; wpasta[inicio] != L'\0'; inicio++)
         {
-            if (pasta[inicio] == '\\' || pasta[inicio] == '/')
+            if (wpasta[inicio] == L'\\' || wpasta[inicio] == L'/')
             {
                 separadores++;
                 if (separadores == 2)
@@ -180,18 +187,18 @@ static int criar_diretorios_para_arquivo(const char *caminho_arquivo)
         inicio = 3;
     }
 
-    for (i = inicio; pasta[i] != '\0'; i++)
+    for (i = inicio; wpasta[i] != L'\0'; i++)
     {
-        if (pasta[i] == '\\' || pasta[i] == '/')
+        if (wpasta[i] == L'\\' || wpasta[i] == L'/')
         {
-            char tmp = pasta[i];
-            pasta[i] = '\0';
-            CreateDirectory(pasta, NULL);
-            pasta[i] = tmp;
+            wchar_t tmp = wpasta[i];
+            wpasta[i] = L'\0';
+            CreateDirectoryW(wpasta, NULL);
+            wpasta[i] = tmp;
         }
     }
 
-    CreateDirectory(pasta, NULL);
+    CreateDirectoryW(wpasta, NULL);
     return 0;
 }
 
