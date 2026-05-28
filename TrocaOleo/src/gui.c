@@ -203,9 +203,15 @@ void criar_controles(HWND hwnd)
     col.cx = 150;
     col.pszText = "Data";
     ListView_InsertColumn(hList, 5, &col);
+    col.cx = 80;
+    col.pszText = "Avisado";
+    ListView_InsertColumn(hList, 6, &col);
 
     CreateWindow("BUTTON", "Ver Historico Completo", WS_CHILD | WS_VISIBLE | BS_PUSHBUTTON,
                  760, 348, 170, 24, hwnd, (HMENU)IDC_BUTTON_VER_HISTORICO_COMPLETO, NULL, NULL);
+
+    CreateStatusWindow(WS_CHILD | WS_VISIBLE | SBARS_SIZEGRIP,
+                       "Pronto", hwnd, IDC_STATUSBAR);
 }
 
 void criar_radio_buttons_oleo(HWND hwnd, TipoOleo *tipos, int count)
@@ -409,6 +415,7 @@ void atualizar_listview(HWND hwndList, TrocaOleo *trocas, int count)
         char tel_info[32];
         char indic[8];
         char data_br[32];
+        char avisado[8];
 
         snprintf(buf_id, sizeof(buf_id), "%d", trocas[i].id);
         if (trocas[i].telefone_informado && trocas[i].telefone[0] != '\0')
@@ -419,7 +426,8 @@ void atualizar_listview(HWND hwndList, TrocaOleo *trocas, int count)
         {
             snprintf(tel_info, sizeof(tel_info), "-");
         }
-        snprintf(indic, sizeof(indic), "%s", trocas[i].veio_indicacao ? "Sim" : "Nao");
+        snprintf(indic,   sizeof(indic),   "%s", trocas[i].veio_indicacao  ? "Sim" : "Nao");
+        snprintf(avisado, sizeof(avisado), "%s", trocas[i].retorno_avisado ? "Sim" : "Nao");
         formatar_data_br(trocas[i].data_troca, data_br, sizeof(data_br));
 
         ZeroMemory(&item, sizeof(item));
@@ -435,6 +443,7 @@ void atualizar_listview(HWND hwndList, TrocaOleo *trocas, int count)
         ListView_SetItemText(hwndList, i, 3, tel_info);
         ListView_SetItemText(hwndList, i, 4, indic);
         ListView_SetItemText(hwndList, i, 5, data_br);
+        ListView_SetItemText(hwndList, i, 6, avisado);
     }
 }
 
@@ -491,6 +500,13 @@ TrocaOleo *obter_item_selecionado(HWND hwndList)
         return NULL;
     }
     return db_buscar_troca_por_id(id);
+}
+
+void atualizar_status(HWND hwnd, const char *texto)
+{
+    HWND hStatus = GetDlgItem(hwnd, IDC_STATUSBAR);
+    if (hStatus != NULL)
+        SetWindowText(hStatus, texto);
 }
 
 void mostrar_erro(HWND hwnd, const char *mensagem)

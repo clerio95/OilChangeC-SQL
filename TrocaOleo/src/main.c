@@ -14,6 +14,7 @@ static Config g_config;
 static int g_edit_id = -1;
 static char g_config_path[MAX_PATH];
 static int g_formatando_telefone = 0;
+static int g_startup_pull_rc = 0;
 
 static void montar_caminho_config(char *out, size_t out_size)
 {
@@ -68,11 +69,29 @@ static void montar_caminho_local_db(char *out, size_t out_size)
     strncat(out, "dados.db", out_size - strlen(out) - 1);
 }
 
-/* Pushes local DB to network path silently — call after every write. */
-static void sincronizar_rede_silencioso(void)
+static void hora_atual(char *out, int size)
 {
-    if (g_config.caminho_rede[0] != '\0')
-        db_sincronizar_para_rede(g_config.caminho_rede);
+    SYSTEMTIME st;
+    GetLocalTime(&st);
+    snprintf(out, size, "%02d:%02d", st.wHour, st.wMinute);
+}
+
+/* Pushes local DB to network and updates the status bar. */
+static void sincronizar_rede_silencioso(HWND hwnd)
+{
+    char msg[64];
+    char hora[8];
+
+    if (g_config.caminho_rede[0] == '\0')
+        return;
+
+    hora_atual(hora, sizeof(hora));
+    if (db_sincronizar_para_rede(g_config.caminho_rede) == 0)
+        snprintf(msg, sizeof(msg), "Sincronizado com a rede — %s", hora);
+    else
+        snprintf(msg, sizeof(msg), "Aviso: falha ao sincronizar com a rede");
+
+    atualizar_status(hwnd, msg);
 }
 
 static void aplicar_mascara_telefone(HWND hwndEdit)
@@ -321,7 +340,7 @@ static void acao_salvar(HWND hwnd)
         return;
     }
 
-    sincronizar_rede_silencioso();
+    sincronizar_rede_silencioso(hwnd);
     carregar_lista_principal(hwnd);
     limpar_formulario(hwnd);
     mostrar_sucesso(hwnd, "Troca cadastrada com sucesso.");
@@ -365,7 +384,7 @@ static void acao_atualizar(HWND hwnd)
     }
 
     g_edit_id = -1;
-    sincronizar_rede_silencioso();
+    sincronizar_rede_silencioso(hwnd);
     carregar_lista_principal(hwnd);
     limpar_formulario(hwnd);
     mostrar_sucesso(hwnd, "Registro atualizado com sucesso.");
@@ -393,7 +412,7 @@ static void acao_deletar(HWND hwnd)
         return;
     }
 
-    sincronizar_rede_silencioso();
+    sincronizar_rede_silencioso(hwnd);
     carregar_lista_principal(hwnd);
     mostrar_sucesso(hwnd, "Registro excluido com sucesso.");
 }
@@ -622,6 +641,9 @@ LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam)
 
         case IDM_SINCRONIZAR:
         {
+            char hora[8];
+            char msg[64];
+
             if (g_config.caminho_rede[0] == '\0')
             {
                 MessageBox(hwnd,
@@ -630,10 +652,18 @@ LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam)
                     "Sincronizacao", MB_OK | MB_ICONINFORMATION);
                 break;
             }
+            hora_atual(hora, sizeof(hora));
             if (db_sincronizar_para_rede(g_config.caminho_rede) == 0)
+            {
+                snprintf(msg, sizeof(msg), "Sincronizado com a rede — %s", hora);
+                atualizar_status(hwnd, msg);
                 MessageBox(hwnd, "Sincronizacao com a rede concluida.", "Sincronizacao", MB_OK | MB_ICONINFORMATION);
+            }
             else
+            {
+                atualizar_status(hwnd, "Aviso: falha ao sincronizar com a rede");
                 MessageBox(hwnd, "Falha ao sincronizar com a rede.\nVerifique a conexao.", "Sincronizacao", MB_OK | MB_ICONWARNING);
+            }
             break;
         }
 
@@ -668,6 +698,14 @@ LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam)
             break;
         }
         return 0;
+
+    case WM_SIZE:
+    {
+        HWND hStatus = GetDlgItem(hwnd, IDC_STATUSBAR);
+        if (hStatus != NULL)
+            SendMessage(hStatus, WM_SIZE, wParam, lParam);
+        return 0;
+    }
 
     case WM_DESTROY:
         db_fechar();
@@ -961,7 +999,7 @@ int APIENTRY WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLi
 
         /* Pull retorno_avisado changes made by the WhatsApp script on the network DB */
         if (g_config.caminho_rede[0] != '\0')
-            db_puxar_retorno_avisado(g_config.caminho_rede);
+            g_startup_pull_rc = db_puxar_retorno_avisado(g_config.caminho_rede);
     }
 
     hwnd = criar_janela_principal(hInstance, nCmdShow);
@@ -969,6 +1007,14 @@ int APIENTRY WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLi
     {
         db_fechar();
         return 1;
+    }
+
+    if (g_config.caminho_rede[0] != '\0')
+    {
+        if (g_startup_pull_rc == 0)
+            atualizar_status(hwnd, "Rede: dados atualizados na inicializacao");
+        else
+            atualizar_status(hwnd, "Aviso: rede indisponivel na inicializacao");
     }
 
     while (GetMessage(&msg, NULL, 0, 0) > 0)

@@ -27,6 +27,7 @@
 #define IDC_EDIT_NOVO_OLEO 1700
 #define IDC_BUTTON_ADICIONAR_OLEO 1701
 #define IDC_BUTTON_REMOVER_OLEO 1702
+#define IDC_STATUSBAR 1800
 
 #define IDM_CONFIG_BD 2001
 #define IDM_CONFIG_OLEOS 2002
@@ -62,5 +63,6 @@ void mostrar_info_historico(HWND hwnd, const char *placa, int total_trocas,
                             const char *oleo_favorito, int intervalo_dias);
 
 HMENU criar_menu_principal(void);
+void atualizar_status(HWND hwnd, const char *texto);
 
 #endif
