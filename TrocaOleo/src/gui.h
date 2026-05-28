@@ -10,6 +10,8 @@
 #define IDC_CHECK_TELEFONE 1200
 #define IDC_EDIT_TELEFONE 1201
 #define IDC_CHECK_INDICACAO 1202
+#define IDC_CHECK_KM_SEMANAL 1203
+#define IDC_EDIT_KM_SEMANAL 1204
 #define IDC_DATETIME_TROCA 1300
 #define IDC_BUTTON_SALVAR 1400
 #define IDC_BUTTON_ATUALIZAR 1401
@@ -32,6 +34,8 @@
 #define IDM_RELATORIO_GERAL 2004
 #define IDM_ABOUT 2005
 #define IDM_SAIR 2006
+#define IDM_CONFIG_REDE 2007
+#define IDM_SINCRONIZAR 2008
 
 HWND criar_janela_principal(HINSTANCE hInstance, int nCmdShow);
 void criar_controles(HWND hwnd);

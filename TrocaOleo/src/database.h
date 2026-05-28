@@ -15,6 +15,9 @@ typedef struct
     char data_troca[20];
     char data_cadastro[20];
     int ativo;
+    int km_semanal_informado;
+    int km_semanal;
+    int retorno_avisado;
 } TrocaOleo;
 
 typedef struct
@@ -24,7 +27,7 @@ typedef struct
     int ativo;
 } TipoOleo;
 
-int db_init(const char *db_path);
+int db_init(const char *db_path, int criar_se_nao_existir);
 int db_criar_tabelas(void);
 
 int db_inserir_troca(const TrocaOleo *troca);
@@ -32,6 +35,7 @@ TrocaOleo *db_listar_trocas(const char *filtro_placa, int *count);
 TrocaOleo *db_listar_ultimas_trocas(const char *filtro_placa, int *count);
 int db_atualizar_troca(int id, const TrocaOleo *troca);
 int db_deletar_troca(int id);
+int db_marcar_retorno_avisado(int id);
 TrocaOleo *db_buscar_troca_por_id(int id);
 
 TrocaOleo *db_historico_por_placa(const char *placa, int *count);
@@ -49,6 +53,11 @@ TipoOleo *db_listar_tipos_oleo(int *count);
 int db_adicionar_tipo_oleo(const char *nome);
 int db_remover_tipo_oleo(int id);
 int db_remover_tipo_oleo_por_nome(const char *nome);
+
+/* Network sync */
+int db_sincronizar_para_rede(const char *network_path);
+int db_puxar_retorno_avisado(const char *network_path);
+int db_bootstrap_da_rede(const char *network_path);
 
 void db_fechar(void);
 void db_liberar_trocas(TrocaOleo *trocas);

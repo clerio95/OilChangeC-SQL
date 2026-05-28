@@ -42,6 +42,39 @@ static void montar_caminho_config(char *out, size_t out_size)
     strncat(out, "config.ini", out_size - strlen(out) - 1);
 }
 
+/* Builds the path to dados.db in the same folder as the exe. */
+static void montar_caminho_local_db(char *out, size_t out_size)
+{
+    size_t i;
+
+    if (out == NULL || out_size == 0)
+        return;
+
+    if (GetModuleFileNameA(NULL, out, (DWORD)out_size) == 0)
+    {
+        snprintf(out, out_size, "dados.db");
+        return;
+    }
+
+    for (i = strlen(out); i > 0; i--)
+    {
+        if (out[i] == '\\' || out[i] == '/')
+        {
+            out[i + 1] = '\0';
+            break;
+        }
+    }
+
+    strncat(out, "dados.db", out_size - strlen(out) - 1);
+}
+
+/* Pushes local DB to network path silently — call after every write. */
+static void sincronizar_rede_silencioso(void)
+{
+    if (g_config.caminho_rede[0] != '\0')
+        db_sincronizar_para_rede(g_config.caminho_rede);
+}
+
 static void aplicar_mascara_telefone(HWND hwndEdit)
 {
     char atual[32];
@@ -288,6 +321,7 @@ static void acao_salvar(HWND hwnd)
         return;
     }
 
+    sincronizar_rede_silencioso();
     carregar_lista_principal(hwnd);
     limpar_formulario(hwnd);
     mostrar_sucesso(hwnd, "Troca cadastrada com sucesso.");
@@ -331,6 +365,7 @@ static void acao_atualizar(HWND hwnd)
     }
 
     g_edit_id = -1;
+    sincronizar_rede_silencioso();
     carregar_lista_principal(hwnd);
     limpar_formulario(hwnd);
     mostrar_sucesso(hwnd, "Registro atualizado com sucesso.");
@@ -358,6 +393,7 @@ static void acao_deletar(HWND hwnd)
         return;
     }
 
+    sincronizar_rede_silencioso();
     carregar_lista_principal(hwnd);
     mostrar_sucesso(hwnd, "Registro excluido com sucesso.");
 }
@@ -492,9 +528,16 @@ LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam)
             int marcado = (Button_GetCheck(GetDlgItem(hwnd, IDC_CHECK_TELEFONE)) == BST_CHECKED);
             EnableWindow(GetDlgItem(hwnd, IDC_EDIT_TELEFONE), marcado);
             if (!marcado)
-            {
                 SetWindowText(GetDlgItem(hwnd, IDC_EDIT_TELEFONE), "");
-            }
+            break;
+        }
+
+        case IDC_CHECK_KM_SEMANAL:
+        {
+            int marcado = (Button_GetCheck(GetDlgItem(hwnd, IDC_CHECK_KM_SEMANAL)) == BST_CHECKED);
+            EnableWindow(GetDlgItem(hwnd, IDC_EDIT_KM_SEMANAL), marcado);
+            if (!marcado)
+                SetWindowText(GetDlgItem(hwnd, IDC_EDIT_KM_SEMANAL), "");
             break;
         }
 
@@ -528,13 +571,12 @@ LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam)
             {
                 db_fechar();
                 criar_diretorios_para_arquivo(g_config.caminho_bd);
-
-                if (db_init(g_config.caminho_bd) != 0 || db_criar_tabelas() != 0)
+                if (db_init(g_config.caminho_bd, 1) != 0 || db_criar_tabelas() != 0)
                 {
                     snprintf(g_config.caminho_bd, sizeof(g_config.caminho_bd), "%s", caminho_anterior);
                     config_salvar(g_config_path, &g_config);
                     db_fechar();
-                    db_init(g_config.caminho_bd);
+                    db_init(g_config.caminho_bd, 0);
                     db_criar_tabelas();
                     mostrar_erro(hwnd, "Nao foi possivel abrir o novo banco. Configuracao anterior restaurada.");
                 }
@@ -549,6 +591,49 @@ LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam)
                                MB_OK | MB_ICONINFORMATION);
                 }
             }
+            break;
+        }
+
+        case IDM_CONFIG_REDE:
+        {
+            char path[MAX_PATH];
+            OPENFILENAME ofn;
+            snprintf(path, sizeof(path), "%s", g_config.caminho_rede);
+            ZeroMemory(&ofn, sizeof(ofn));
+            ofn.lStructSize = sizeof(ofn);
+            ofn.hwndOwner   = hwnd;
+            ofn.lpstrFile   = path;
+            ofn.nMaxFile    = sizeof(path);
+            ofn.lpstrFilter = "SQLite Database (*.db)\0*.db\0Todos os arquivos (*.*)\0*.*\0";
+            ofn.lpstrDefExt = "db";
+            ofn.lpstrTitle  = "Selecionar banco de dados de rede (sincronizacao)";
+            ofn.Flags       = OFN_PATHMUSTEXIST | OFN_OVERWRITEPROMPT;
+            if (GetSaveFileName(&ofn))
+            {
+                snprintf(g_config.caminho_rede, sizeof(g_config.caminho_rede), "%s", path);
+                config_salvar(g_config_path, &g_config);
+                MessageBox(hwnd,
+                    "Caminho de rede configurado.\n"
+                    "O banco local sera sincronizado apos cada operacao.",
+                    "Rede Configurada", MB_OK | MB_ICONINFORMATION);
+            }
+            break;
+        }
+
+        case IDM_SINCRONIZAR:
+        {
+            if (g_config.caminho_rede[0] == '\0')
+            {
+                MessageBox(hwnd,
+                    "Nenhum caminho de rede configurado.\n"
+                    "Use Configuracoes > Banco de Rede para configurar.",
+                    "Sincronizacao", MB_OK | MB_ICONINFORMATION);
+                break;
+            }
+            if (db_sincronizar_para_rede(g_config.caminho_rede) == 0)
+                MessageBox(hwnd, "Sincronizacao com a rede concluida.", "Sincronizacao", MB_OK | MB_ICONINFORMATION);
+            else
+                MessageBox(hwnd, "Falha ao sincronizar com a rede.\nVerifique a conexao.", "Sincronizacao", MB_OK | MB_ICONWARNING);
             break;
         }
 
@@ -593,35 +678,290 @@ LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam)
     return DefWindowProc(hwnd, msg, wParam, lParam);
 }
 
+/* Opens a file picker. Returns 1 and fills path on success, 0 if cancelled. */
+static int picker_arquivo_db(char *path, int path_size, int deve_existir)
+{
+    OPENFILENAME ofn;
+    ZeroMemory(&ofn, sizeof(ofn));
+    ofn.lStructSize = sizeof(ofn);
+    ofn.lpstrFile   = path;
+    ofn.nMaxFile    = path_size;
+    ofn.lpstrFilter = "SQLite Database (*.db)\0*.db\0Todos os arquivos (*.*)\0*.*\0";
+    ofn.lpstrDefExt = "db";
+
+    if (deve_existir)
+    {
+        ofn.Flags = OFN_PATHMUSTEXIST | OFN_FILEMUSTEXIST;
+        return GetOpenFileName(&ofn) ? 1 : 0;
+    }
+    else
+    {
+        ofn.Flags = OFN_PATHMUSTEXIST | OFN_OVERWRITEPROMPT;
+        return GetSaveFileName(&ofn) ? 1 : 0;
+    }
+}
+
+/* Shows the first-run dialog. Returns 1 if path was chosen and config saved. */
+static int dialogo_primeira_execucao(void)
+{
+    int escolha;
+    char path[MAX_PATH];
+
+    escolha = MessageBox(NULL,
+        "Configuracao inicial detectada.\n\n"
+        "Deseja:\n"
+        "  [Sim]  Conectar a um banco de dados existente\n"
+        "  [Nao]  Criar um novo banco de dados\n"
+        "  [Cancelar]  Sair",
+        "Primeira Execucao",
+        MB_YESNOCANCEL | MB_ICONQUESTION);
+
+    if (escolha == IDCANCEL)
+        return 0;
+
+    snprintf(path, sizeof(path), "%s", g_config.caminho_bd);
+
+    if (escolha == IDYES)
+    {
+        if (!picker_arquivo_db(path, sizeof(path), 1))
+            return 0;
+        snprintf(g_config.caminho_bd, sizeof(g_config.caminho_bd), "%s", path);
+        config_salvar(g_config_path, &g_config);
+
+        if (db_init(g_config.caminho_bd, 0) != 0)
+        {
+            MessageBox(NULL,
+                "Nao foi possivel abrir o banco selecionado.",
+                "Erro", MB_OK | MB_ICONERROR);
+            return 0;
+        }
+    }
+    else /* IDNO — create new */
+    {
+        if (!picker_arquivo_db(path, sizeof(path), 0))
+            return 0;
+        snprintf(g_config.caminho_bd, sizeof(g_config.caminho_bd), "%s", path);
+        config_salvar(g_config_path, &g_config);
+        criar_diretorios_para_arquivo(g_config.caminho_bd);
+
+        if (db_init(g_config.caminho_bd, 1) != 0)
+        {
+            MessageBox(NULL,
+                "Nao foi possivel criar o banco de dados.",
+                "Erro", MB_OK | MB_ICONERROR);
+            return 0;
+        }
+    }
+
+    if (db_criar_tabelas() != 0)
+    {
+        MessageBox(NULL, "Erro ao preparar o banco de dados.", "Erro", MB_OK | MB_ICONERROR);
+        db_fechar();
+        return 0;
+    }
+
+    return 1;
+}
+
+/* Handles DB-not-found at startup. Returns 1 if successfully connected. */
+static int dialogo_banco_nao_encontrado(void)
+{
+    char msg[MAX_PATH + 256];
+    int escolha;
+    char path[MAX_PATH];
+
+    for (;;)
+    {
+        snprintf(msg, sizeof(msg),
+            "Banco de dados nao encontrado:\n%s\n\n"
+            "O arquivo pode estar em um drive de rede ainda nao conectado.\n\n"
+            "  [Tentar Novamente]   Sim\n"
+            "  [Configurar Caminho]   Nao\n"
+            "  [Criar Novo Banco]   Cancelar",
+            g_config.caminho_bd);
+
+        escolha = MessageBox(NULL, msg, "Banco Nao Encontrado",
+                             MB_YESNOCANCEL | MB_ICONWARNING);
+
+        if (escolha == IDYES)
+        {
+            if (db_init(g_config.caminho_bd, 0) == 0)
+            {
+                if (db_criar_tabelas() != 0)
+                {
+                    MessageBox(NULL, "Erro ao preparar o banco.", "Erro", MB_OK | MB_ICONERROR);
+                    db_fechar();
+                    return 0;
+                }
+                return 1;
+            }
+            /* still not found — loop again */
+            continue;
+        }
+
+        if (escolha == IDNO)
+        {
+            snprintf(path, sizeof(path), "%s", g_config.caminho_bd);
+            if (!picker_arquivo_db(path, sizeof(path), 1))
+                continue;
+            snprintf(g_config.caminho_bd, sizeof(g_config.caminho_bd), "%s", path);
+            config_salvar(g_config_path, &g_config);
+
+            if (db_init(g_config.caminho_bd, 0) != 0)
+            {
+                MessageBox(NULL,
+                    "Nao foi possivel abrir o banco selecionado.",
+                    "Erro", MB_OK | MB_ICONERROR);
+                continue;
+            }
+            if (db_criar_tabelas() != 0)
+            {
+                MessageBox(NULL, "Erro ao preparar o banco.", "Erro", MB_OK | MB_ICONERROR);
+                db_fechar();
+                return 0;
+            }
+            return 1;
+        }
+
+        /* IDCANCEL — create new DB */
+        snprintf(path, sizeof(path), "%s", g_config.caminho_bd);
+        if (!picker_arquivo_db(path, sizeof(path), 0))
+            continue;
+        snprintf(g_config.caminho_bd, sizeof(g_config.caminho_bd), "%s", path);
+        config_salvar(g_config_path, &g_config);
+        criar_diretorios_para_arquivo(g_config.caminho_bd);
+
+        if (db_init(g_config.caminho_bd, 1) != 0)
+        {
+            MessageBox(NULL, "Nao foi possivel criar o banco.", "Erro", MB_OK | MB_ICONERROR);
+            continue;
+        }
+        if (db_criar_tabelas() != 0)
+        {
+            MessageBox(NULL, "Erro ao preparar o banco.", "Erro", MB_OK | MB_ICONERROR);
+            db_fechar();
+            return 0;
+        }
+        return 1;
+    }
+}
+
+/* Returns 1 if path starts with \\ (UNC) or refers to a non-local drive letter.
+   This heuristic detects the old config where caminho_bd was the network DB. */
+static int parece_caminho_de_rede(const char *path)
+{
+    if (path == NULL || path[0] == '\0')
+        return 0;
+    if (path[0] == '\\' && path[1] == '\\')
+        return 1; /* UNC path */
+    /* Any absolute path that is NOT the exe folder is treated as "configured" */
+    return 0;
+}
+
 int APIENTRY WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLine, int nCmdShow)
 {
     MSG msg;
     HWND hwnd;
+    int cfg_result;
+    char local_path[MAX_PATH];
 
     (void)hPrevInstance;
     (void)lpCmdLine;
 
     montar_caminho_config(g_config_path, sizeof(g_config_path));
+    montar_caminho_local_db(local_path, sizeof(local_path));
 
-    if (config_carregar(g_config_path, &g_config) != 0)
+    cfg_result = config_carregar(g_config_path, &g_config);
+
+    if (cfg_result == -1)
     {
-        MessageBox(NULL, "Nao foi possivel carregar config.ini", "Erro", MB_OK | MB_ICONERROR);
+        MessageBox(NULL, "Erro ao ler config.ini.", "Erro", MB_OK | MB_ICONERROR);
         return 1;
     }
 
-    criar_diretorios_para_arquivo(g_config.caminho_bd);
-
-    if (db_init(g_config.caminho_bd) != 0)
+    /* ---------------------------------------------------------------
+       Migration: old config had caminho_bd = network path and no
+       caminho_rede field. Detect and migrate automatically.
+       --------------------------------------------------------------- */
+    if (cfg_result == 0 &&
+        g_config.caminho_rede[0] == '\0' &&
+        strcmp(g_config.caminho_bd, local_path) != 0 &&
+        strcmp(g_config.caminho_bd, "dados.db") != 0)
     {
-        MessageBox(NULL, "Erro ao abrir banco SQLite.", "Erro", MB_OK | MB_ICONERROR);
-        return 1;
+        /* Old config: caminho_bd was the network/non-local DB. Migrate. */
+        snprintf(g_config.caminho_rede, sizeof(g_config.caminho_rede), "%s", g_config.caminho_bd);
+        snprintf(g_config.caminho_bd,   sizeof(g_config.caminho_bd),   "%s", local_path);
+
+        /* Open (or create) local DB, then bootstrap from network */
+        criar_diretorios_para_arquivo(g_config.caminho_bd);
+        if (db_init(g_config.caminho_bd, 1) == 0 && db_criar_tabelas() == 0)
+        {
+            if (db_bootstrap_da_rede(g_config.caminho_rede) == 0)
+            {
+                config_salvar(g_config_path, &g_config);
+                MessageBox(NULL,
+                    "Configuracao atualizada:\n\n"
+                    "O banco de dados agora reside localmente e sera\n"
+                    "sincronizado automaticamente com a rede apos cada operacao.\n\n"
+                    "Banco de rede: copiado para o banco local com sucesso.",
+                    "Migracao Concluida", MB_OK | MB_ICONINFORMATION);
+            }
+            else
+            {
+                /* Bootstrap failed — rede unavailable. Keep local empty but save config. */
+                config_salvar(g_config_path, &g_config);
+                MessageBox(NULL,
+                    "Banco de rede nao acessivel no momento.\n\n"
+                    "O programa iniciara com banco local vazio.\n"
+                    "Use Configuracoes > Sincronizar com Rede Agora assim que\n"
+                    "a rede estiver disponivel para copiar os dados.",
+                    "Rede Indisponivel", MB_OK | MB_ICONWARNING);
+            }
+        }
+        else
+        {
+            MessageBox(NULL, "Erro ao criar banco local durante migracao.", "Erro", MB_OK | MB_ICONERROR);
+            db_fechar();
+            return 1;
+        }
     }
-
-    if (db_criar_tabelas() != 0)
+    else if (cfg_result == 1)
     {
-        MessageBox(NULL, "Erro ao criar tabelas no banco.", "Erro", MB_OK | MB_ICONERROR);
-        db_fechar();
-        return 1;
+        /* First run — config.ini was not found */
+        if (!dialogo_primeira_execucao())
+            return 1;
+
+        /* If user chose a network path as local, ask about separate network sync */
+        if (g_config.caminho_rede[0] == '\0' && parece_caminho_de_rede(g_config.caminho_bd))
+        {
+            /* They accidentally set a UNC path as local — treat as network, bootstrap local */
+            snprintf(g_config.caminho_rede, sizeof(g_config.caminho_rede), "%s", g_config.caminho_bd);
+            snprintf(g_config.caminho_bd,   sizeof(g_config.caminho_bd),   "%s", local_path);
+            db_fechar();
+            criar_diretorios_para_arquivo(g_config.caminho_bd);
+            if (db_init(g_config.caminho_bd, 1) == 0 && db_criar_tabelas() == 0)
+                db_bootstrap_da_rede(g_config.caminho_rede);
+            config_salvar(g_config_path, &g_config);
+        }
+    }
+    else
+    {
+        /* Normal startup — try to open local DB */
+        if (db_init(g_config.caminho_bd, 0) != 0)
+        {
+            if (!dialogo_banco_nao_encontrado())
+                return 1;
+        }
+        else if (db_criar_tabelas() != 0)
+        {
+            MessageBox(NULL, "Erro ao preparar o banco.", "Erro", MB_OK | MB_ICONERROR);
+            db_fechar();
+            return 1;
+        }
+
+        /* Pull retorno_avisado changes made by the WhatsApp script on the network DB */
+        if (g_config.caminho_rede[0] != '\0')
+            db_puxar_retorno_avisado(g_config.caminho_rede);
     }
 
     hwnd = criar_janela_principal(hInstance, nCmdShow);

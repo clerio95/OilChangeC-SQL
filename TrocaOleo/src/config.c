@@ -8,11 +8,10 @@
 static void config_defaults(Config *config)
 {
     if (config == NULL)
-    {
         return;
-    }
 
-    snprintf(config->caminho_bd, sizeof(config->caminho_bd), "C:\\TrocaOleo\\dados.db");
+    snprintf(config->caminho_bd, sizeof(config->caminho_bd), "dados.db");
+    config->caminho_rede[0] = '\0';
     snprintf(config->tema, sizeof(config->tema), "claro");
     config->fonte_tamanho = 10;
     config->auto_backup = 1;
@@ -50,7 +49,7 @@ int config_carregar(const char *config_path, Config *config)
     f = fopen(config_path, "r");
     if (f == NULL)
     {
-        return config_salvar(config_path, config);
+        return 1; /* not found — caller must decide what to do */
     }
 
     while (fgets(line, sizeof(line), f) != NULL)
@@ -60,6 +59,10 @@ int config_carregar(const char *config_path, Config *config)
         if (strncmp(line, "caminho=", 8) == 0)
         {
             snprintf(config->caminho_bd, sizeof(config->caminho_bd), "%s", line + 8);
+        }
+        else if (strncmp(line, "caminho_rede=", 13) == 0)
+        {
+            snprintf(config->caminho_rede, sizeof(config->caminho_rede), "%s", line + 13);
         }
         else if (strncmp(line, "tema=", 5) == 0)
         {
@@ -99,7 +102,8 @@ int config_salvar(const char *config_path, const Config *config)
     }
 
     fprintf(f, "[Database]\n");
-    fprintf(f, "caminho=%s\n\n", config->caminho_bd);
+    fprintf(f, "caminho=%s\n", config->caminho_bd);
+    fprintf(f, "caminho_rede=%s\n\n", config->caminho_rede);
 
     fprintf(f, "[Interface]\n");
     fprintf(f, "tema=%s\n", config->tema);

@@ -66,7 +66,7 @@ static void preencher_troca_stmt(sqlite3_stmt *stmt, TrocaOleo *t)
         snprintf(t->telefone, sizeof(t->telefone), "%s", (const char *)s);
 
     t->telefone_informado = sqlite3_column_int(stmt, 4);
-    t->veio_indicacao = sqlite3_column_int(stmt, 5);
+    t->veio_indicacao     = sqlite3_column_int(stmt, 5);
 
     s = sqlite3_column_text(stmt, 6);
     if (s)
@@ -76,7 +76,10 @@ static void preencher_troca_stmt(sqlite3_stmt *stmt, TrocaOleo *t)
     if (s)
         snprintf(t->data_cadastro, sizeof(t->data_cadastro), "%s", (const char *)s);
 
-    t->ativo = sqlite3_column_int(stmt, 8);
+    t->ativo                = sqlite3_column_int(stmt, 8);
+    t->km_semanal_informado = sqlite3_column_int(stmt, 9);
+    t->km_semanal           = sqlite3_column_int(stmt, 10);
+    t->retorno_avisado      = sqlite3_column_int(stmt, 11);
 }
 
 static TrocaOleo *listar_trocas_por_sql(const char *sql, const char *filtro, int *count)
@@ -138,24 +141,57 @@ static TrocaOleo *listar_trocas_por_sql(const char *sql, const char *filtro, int
     return lista;
 }
 
-int db_init(const char *db_path)
+static int column_exists(const char *table, const char *column)
+{
+    char sql[256];
+    sqlite3_stmt *stmt = NULL;
+    int found = 0;
+
+    snprintf(sql, sizeof(sql), "PRAGMA table_info(%s);", table);
+    if (sqlite3_prepare_v2(g_db, sql, -1, &stmt, NULL) != SQLITE_OK)
+        return 0;
+
+    while (sqlite3_step(stmt) == SQLITE_ROW)
+    {
+        const char *col_name = (const char *)sqlite3_column_text(stmt, 1);
+        if (col_name && strcmp(col_name, column) == 0)
+        {
+            found = 1;
+            break;
+        }
+    }
+    sqlite3_finalize(stmt);
+    return found;
+}
+
+static void add_column_if_missing(const char *table, const char *column, const char *type_def)
+{
+    char sql[256];
+    if (column_exists(table, column))
+        return;
+    snprintf(sql, sizeof(sql), "ALTER TABLE %s ADD COLUMN %s %s;", table, column, type_def);
+    sqlite3_exec(g_db, sql, NULL, NULL, NULL);
+}
+
+int db_init(const char *db_path, int criar_se_nao_existir)
 {
     wchar_t wpath[MAX_PATH];
+    DWORD attr;
 
     if (db_path == NULL)
-    {
         return -1;
-    }
 
     if (g_db != NULL)
-    {
         return 0;
-    }
 
-    /* Converter caminho ANSI para wide char (UTF-16) para suportar acentos */
     if (MultiByteToWideChar(CP_ACP, 0, db_path, -1, wpath, MAX_PATH) == 0)
-    {
         return -1;
+
+    if (!criar_se_nao_existir)
+    {
+        attr = GetFileAttributesW(wpath);
+        if (attr == INVALID_FILE_ATTRIBUTES || (attr & FILE_ATTRIBUTE_DIRECTORY))
+            return -1;
     }
 
     if (sqlite3_open16(wpath, &g_db) != SQLITE_OK)
@@ -184,7 +220,10 @@ int db_criar_tabelas(void)
         "veio_indicacao INTEGER DEFAULT 0,"
         "data_troca TEXT NOT NULL,"
         "data_cadastro TEXT DEFAULT CURRENT_TIMESTAMP,"
-        "ativo INTEGER DEFAULT 1"
+        "ativo INTEGER DEFAULT 1,"
+        "km_semanal_informado INTEGER DEFAULT 0,"
+        "km_semanal INTEGER DEFAULT 0,"
+        "retorno_avisado INTEGER DEFAULT 0"
         ");"
         "CREATE INDEX IF NOT EXISTS idx_placa ON trocas_oleo(placa);"
         "CREATE INDEX IF NOT EXISTS idx_data_troca ON trocas_oleo(data_troca DESC);"
@@ -222,19 +261,48 @@ int db_criar_tabelas(void)
         "INSERT OR IGNORE INTO configuracoes (chave, valor) VALUES "
         "('caminho_bd', 'C:\\\\TrocaOleo\\\\dados.db');";
 
+    /* clientes_para_contato: rebuilt every startup so the definition stays current.
+       Third-party script queries: SELECT * FROM clientes_para_contato WHERE oleo_vencido=1 */
+    const char *sql_vista_contato =
+        "DROP VIEW IF EXISTS clientes_para_contato;"
+        "CREATE VIEW clientes_para_contato AS "
+        "SELECT t.*, "
+        "  CAST(julianday('now') - julianday(t.data_troca) AS INTEGER) AS dias_desde_troca, "
+        "  CASE "
+        "    WHEN t.km_semanal_informado = 1 AND t.km_semanal > 0 "
+        "         AND CAST((julianday('now') - julianday(t.data_troca)) / 7.0 * t.km_semanal AS INTEGER) >= 10000 "
+        "    THEN 1 "
+        "    WHEN (t.km_semanal_informado = 0 OR t.km_semanal = 0) "
+        "         AND CAST(julianday('now') - julianday(t.data_troca) AS INTEGER) >= 180 "
+        "    THEN 1 "
+        "    ELSE 0 "
+        "  END AS oleo_vencido "
+        "FROM ultimas_trocas t "
+        "WHERE t.telefone_informado = 1 "
+        "  AND t.retorno_avisado = 0;";
+
     char *err = NULL;
+
     if (g_db == NULL)
-    {
         return -1;
-    }
 
     if (sqlite3_exec(g_db, sql_schema, NULL, NULL, &err) != SQLITE_OK)
     {
-        if (err != NULL)
-        {
+        if (err)
             sqlite3_free(err);
-        }
         return -1;
+    }
+
+    /* Migrate existing databases that predate these columns */
+    add_column_if_missing("trocas_oleo", "km_semanal_informado", "INTEGER DEFAULT 0");
+    add_column_if_missing("trocas_oleo", "km_semanal",           "INTEGER DEFAULT 0");
+    add_column_if_missing("trocas_oleo", "retorno_avisado",      "INTEGER DEFAULT 0");
+
+    /* Rebuild the contact view after migration so column references are valid */
+    if (sqlite3_exec(g_db, sql_vista_contato, NULL, NULL, &err) != SQLITE_OK)
+    {
+        if (err)
+            sqlite3_free(err);
     }
 
     return 0;
@@ -243,19 +311,17 @@ int db_criar_tabelas(void)
 int db_inserir_troca(const TrocaOleo *troca)
 {
     const char *sql =
-        "INSERT INTO trocas_oleo (placa, tipo_oleo, telefone, telefone_informado, veio_indicacao, data_troca) "
-        "VALUES (?, ?, ?, ?, ?, ?);";
+        "INSERT INTO trocas_oleo "
+        "(placa, tipo_oleo, telefone, telefone_informado, veio_indicacao, data_troca, "
+        "km_semanal_informado, km_semanal) "
+        "VALUES (?, ?, ?, ?, ?, ?, ?, ?);";
     sqlite3_stmt *stmt = NULL;
 
     if (g_db == NULL || troca == NULL)
-    {
         return -1;
-    }
 
     if (sqlite3_prepare_v2(g_db, sql, -1, &stmt, NULL) != SQLITE_OK)
-    {
         return -1;
-    }
 
     sqlite3_bind_text(stmt, 1, troca->placa, -1, SQLITE_TRANSIENT);
     sqlite3_bind_text(stmt, 2, troca->tipo_oleo, -1, SQLITE_TRANSIENT);
@@ -263,6 +329,8 @@ int db_inserir_troca(const TrocaOleo *troca)
     sqlite3_bind_int(stmt, 4, troca->telefone_informado);
     sqlite3_bind_int(stmt, 5, troca->veio_indicacao);
     sqlite3_bind_text(stmt, 6, troca->data_troca, -1, SQLITE_TRANSIENT);
+    sqlite3_bind_int(stmt, 7, troca->km_semanal_informado);
+    sqlite3_bind_int(stmt, 8, troca->km_semanal);
 
     if (sqlite3_step(stmt) != SQLITE_DONE)
     {
@@ -277,7 +345,8 @@ int db_inserir_troca(const TrocaOleo *troca)
 TrocaOleo *db_listar_trocas(const char *filtro_placa, int *count)
 {
     const char *sql =
-        "SELECT id, placa, tipo_oleo, telefone, telefone_informado, veio_indicacao, data_troca, data_cadastro, ativo "
+        "SELECT id, placa, tipo_oleo, telefone, telefone_informado, veio_indicacao, "
+        "data_troca, data_cadastro, ativo, km_semanal_informado, km_semanal, retorno_avisado "
         "FROM trocas_oleo "
         "WHERE ativo = 1 AND placa LIKE ? "
         "ORDER BY data_troca DESC;";
@@ -288,7 +357,8 @@ TrocaOleo *db_listar_trocas(const char *filtro_placa, int *count)
 TrocaOleo *db_listar_ultimas_trocas(const char *filtro_placa, int *count)
 {
     const char *sql =
-        "SELECT id, placa, tipo_oleo, telefone, telefone_informado, veio_indicacao, data_troca, data_cadastro, ativo "
+        "SELECT id, placa, tipo_oleo, telefone, telefone_informado, veio_indicacao, "
+        "data_troca, data_cadastro, ativo, km_semanal_informado, km_semanal, retorno_avisado "
         "FROM ultimas_trocas "
         "WHERE placa LIKE ? "
         "ORDER BY data_troca DESC;";
@@ -300,19 +370,16 @@ int db_atualizar_troca(int id, const TrocaOleo *troca)
 {
     const char *sql =
         "UPDATE trocas_oleo "
-        "SET placa=?, tipo_oleo=?, telefone=?, telefone_informado=?, veio_indicacao=?, data_troca=? "
+        "SET placa=?, tipo_oleo=?, telefone=?, telefone_informado=?, veio_indicacao=?, "
+        "data_troca=?, km_semanal_informado=?, km_semanal=? "
         "WHERE id=?;";
     sqlite3_stmt *stmt = NULL;
 
     if (g_db == NULL || troca == NULL)
-    {
         return -1;
-    }
 
     if (sqlite3_prepare_v2(g_db, sql, -1, &stmt, NULL) != SQLITE_OK)
-    {
         return -1;
-    }
 
     sqlite3_bind_text(stmt, 1, troca->placa, -1, SQLITE_TRANSIENT);
     sqlite3_bind_text(stmt, 2, troca->tipo_oleo, -1, SQLITE_TRANSIENT);
@@ -320,7 +387,9 @@ int db_atualizar_troca(int id, const TrocaOleo *troca)
     sqlite3_bind_int(stmt, 4, troca->telefone_informado);
     sqlite3_bind_int(stmt, 5, troca->veio_indicacao);
     sqlite3_bind_text(stmt, 6, troca->data_troca, -1, SQLITE_TRANSIENT);
-    sqlite3_bind_int(stmt, 7, id);
+    sqlite3_bind_int(stmt, 7, troca->km_semanal_informado);
+    sqlite3_bind_int(stmt, 8, troca->km_semanal);
+    sqlite3_bind_int(stmt, 9, id);
 
     if (sqlite3_step(stmt) != SQLITE_DONE)
     {
@@ -362,7 +431,8 @@ int db_deletar_troca(int id)
 TrocaOleo *db_buscar_troca_por_id(int id)
 {
     const char *sql =
-        "SELECT id, placa, tipo_oleo, telefone, telefone_informado, veio_indicacao, data_troca, data_cadastro, ativo "
+        "SELECT id, placa, tipo_oleo, telefone, telefone_informado, veio_indicacao, "
+        "data_troca, data_cadastro, ativo, km_semanal_informado, km_semanal, retorno_avisado "
         "FROM trocas_oleo WHERE id = ?;";
     sqlite3_stmt *stmt = NULL;
     TrocaOleo *out;
@@ -400,7 +470,8 @@ TrocaOleo *db_buscar_troca_por_id(int id)
 TrocaOleo *db_historico_por_placa(const char *placa, int *count)
 {
     const char *sql =
-        "SELECT id, placa, tipo_oleo, telefone, telefone_informado, veio_indicacao, data_troca, data_cadastro, ativo "
+        "SELECT id, placa, tipo_oleo, telefone, telefone_informado, veio_indicacao, "
+        "data_troca, data_cadastro, ativo, km_semanal_informado, km_semanal, retorno_avisado "
         "FROM trocas_oleo WHERE ativo=1 AND placa=? ORDER BY data_troca DESC;";
     sqlite3_stmt *stmt = NULL;
     TrocaOleo *lista = NULL;
@@ -843,6 +914,153 @@ int db_remover_tipo_oleo_por_nome(const char *nome)
     }
 
     sqlite3_bind_text(stmt, 1, nome, -1, SQLITE_TRANSIENT);
+
+    if (sqlite3_step(stmt) != SQLITE_DONE)
+    {
+        sqlite3_finalize(stmt);
+        return -1;
+    }
+
+    sqlite3_finalize(stmt);
+    return 0;
+}
+
+int db_sincronizar_para_rede(const char *network_path)
+{
+    wchar_t wpath[MAX_PATH];
+    sqlite3 *dest = NULL;
+    sqlite3_backup *backup;
+    int rc;
+
+    if (network_path == NULL || network_path[0] == '\0' || g_db == NULL)
+        return -1;
+
+    if (MultiByteToWideChar(CP_ACP, 0, network_path, -1, wpath, MAX_PATH) == 0)
+        return -1;
+
+    if (sqlite3_open16(wpath, &dest) != SQLITE_OK)
+    {
+        if (dest)
+            sqlite3_close(dest);
+        return -1;
+    }
+
+    backup = sqlite3_backup_init(dest, "main", g_db, "main");
+    if (backup == NULL)
+    {
+        sqlite3_close(dest);
+        return -1;
+    }
+
+    rc = sqlite3_backup_step(backup, -1);
+    sqlite3_backup_finish(backup);
+    sqlite3_close(dest);
+    return (rc == SQLITE_DONE) ? 0 : -1;
+}
+
+int db_puxar_retorno_avisado(const char *network_path)
+{
+    wchar_t wpath[MAX_PATH];
+    sqlite3 *rede = NULL;
+    sqlite3_stmt *sel = NULL;
+    sqlite3_stmt *upd = NULL;
+    DWORD attr;
+
+    if (network_path == NULL || network_path[0] == '\0' || g_db == NULL)
+        return -1;
+
+    if (MultiByteToWideChar(CP_ACP, 0, network_path, -1, wpath, MAX_PATH) == 0)
+        return -1;
+
+    attr = GetFileAttributesW(wpath);
+    if (attr == INVALID_FILE_ATTRIBUTES || (attr & FILE_ATTRIBUTE_DIRECTORY))
+        return -1;
+
+    if (sqlite3_open16(wpath, &rede) != SQLITE_OK)
+    {
+        if (rede)
+            sqlite3_close(rede);
+        return -1;
+    }
+
+    if (sqlite3_prepare_v2(g_db,
+            "UPDATE trocas_oleo SET retorno_avisado=1 WHERE id=? AND retorno_avisado=0;",
+            -1, &upd, NULL) != SQLITE_OK)
+    {
+        sqlite3_close(rede);
+        return -1;
+    }
+
+    if (sqlite3_prepare_v2(rede,
+            "SELECT id FROM trocas_oleo WHERE retorno_avisado=1;",
+            -1, &sel, NULL) == SQLITE_OK)
+    {
+        while (sqlite3_step(sel) == SQLITE_ROW)
+        {
+            int id = sqlite3_column_int(sel, 0);
+            sqlite3_bind_int(upd, 1, id);
+            sqlite3_step(upd);
+            sqlite3_reset(upd);
+        }
+        sqlite3_finalize(sel);
+    }
+
+    sqlite3_finalize(upd);
+    sqlite3_close(rede);
+    return 0;
+}
+
+int db_bootstrap_da_rede(const char *network_path)
+{
+    wchar_t wpath[MAX_PATH];
+    sqlite3 *src = NULL;
+    sqlite3_backup *backup;
+    DWORD attr;
+    int rc;
+
+    if (network_path == NULL || network_path[0] == '\0' || g_db == NULL)
+        return -1;
+
+    if (MultiByteToWideChar(CP_ACP, 0, network_path, -1, wpath, MAX_PATH) == 0)
+        return -1;
+
+    attr = GetFileAttributesW(wpath);
+    if (attr == INVALID_FILE_ATTRIBUTES || (attr & FILE_ATTRIBUTE_DIRECTORY))
+        return -1;
+
+    if (sqlite3_open16(wpath, &src) != SQLITE_OK)
+    {
+        if (src)
+            sqlite3_close(src);
+        return -1;
+    }
+
+    /* Copy network → local (g_db is the local open connection) */
+    backup = sqlite3_backup_init(g_db, "main", src, "main");
+    if (backup == NULL)
+    {
+        sqlite3_close(src);
+        return -1;
+    }
+
+    rc = sqlite3_backup_step(backup, -1);
+    sqlite3_backup_finish(backup);
+    sqlite3_close(src);
+    return (rc == SQLITE_DONE) ? 0 : -1;
+}
+
+int db_marcar_retorno_avisado(int id)
+{
+    const char *sql = "UPDATE trocas_oleo SET retorno_avisado=1 WHERE id=?;";
+    sqlite3_stmt *stmt = NULL;
+
+    if (g_db == NULL)
+        return -1;
+
+    if (sqlite3_prepare_v2(g_db, sql, -1, &stmt, NULL) != SQLITE_OK)
+        return -1;
+
+    sqlite3_bind_int(stmt, 1, id);
 
     if (sqlite3_step(stmt) != SQLITE_DONE)
     {
