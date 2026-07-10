@@ -14,6 +14,7 @@ static Config g_config;
 static int g_edit_id = -1;
 static char g_config_path[MAX_PATH];
 static int g_formatando_telefone = 0;
+static int g_formatando_placa = 0;
 static int g_startup_pull_rc = 0;
 
 static void montar_caminho_config(char *out, size_t out_size)
@@ -153,32 +154,94 @@ static void aplicar_mascara_telefone(HWND hwndEdit)
     g_formatando_telefone = 0;
 }
 
-static void trim_texto(char *s)
+/* Formata a placa enquanto digita (maiusculas, hifen automatico no formato
+   antigo) e atualiza o rotulo com o formato detectado.
+   Antigo: ABC-1234 (4 digitos). Mercosul: ABC1D23 (letra na 5a posicao).
+   A 5a posicao decide o formato; ate la os dois sao possiveis. */
+static void aplicar_mascara_placa(HWND hwnd)
 {
-    size_t len;
-    size_t ini = 0;
+    HWND hEdit = GetDlgItem(hwnd, IDC_EDIT_PLACA);
+    char atual[32];
+    char limpo[8];
+    char exibir[10];
+    const char *rotulo = "";
+    int i;
+    int n = 0;
+    int tem_hifen = 0;
+    int pode_antigo = 1;
+    int pode_mercosul = 1;
+    int antigo = 0;
 
-    if (s == NULL)
+    if (g_formatando_placa)
     {
         return;
     }
 
-    while (s[ini] != '\0' && isspace((unsigned char)s[ini]))
+    GetWindowText(hEdit, atual, (int)sizeof(atual));
+
+    for (i = 0; atual[i] != '\0' && n < 7; i++)
     {
-        ini++;
+        if (isalnum((unsigned char)atual[i]))
+        {
+            limpo[n++] = (char)toupper((unsigned char)atual[i]);
+        }
+        else if (atual[i] == '-')
+        {
+            tem_hifen = 1;
+        }
+    }
+    limpo[n] = '\0';
+
+    for (i = 0; i < n; i++)
+    {
+        int letra = isalpha((unsigned char)limpo[i]);
+        int digito = isdigit((unsigned char)limpo[i]);
+
+        if ((i < 3) ? !letra : !digito)
+        {
+            pode_antigo = 0;
+        }
+        if ((i < 3 || i == 4) ? !letra : !digito)
+        {
+            pode_mercosul = 0;
+        }
     }
 
-    if (ini > 0)
+    if (n > 0 && !pode_antigo && !pode_mercosul)
     {
-        memmove(s, s + ini, strlen(s + ini) + 1);
+        rotulo = "Placa invalida";
+    }
+    else if (pode_antigo && !pode_mercosul)
+    {
+        antigo = 1;
+        rotulo = "Placa antiga";
+    }
+    else if (pode_mercosul && !pode_antigo)
+    {
+        rotulo = "Placa Mercosul";
+    }
+    else if (n > 0 && tem_hifen)
+    {
+        /* Ambiguo (menos de 5 caracteres), mas o hifen indica formato antigo */
+        antigo = 1;
+        rotulo = "Placa antiga";
     }
 
-    len = strlen(s);
-    while (len > 0 && isspace((unsigned char)s[len - 1]))
+    if (antigo && n > 3)
     {
-        s[len - 1] = '\0';
-        len--;
+        snprintf(exibir, sizeof(exibir), "%.3s-%s", limpo, limpo + 3);
     }
+    else
+    {
+        snprintf(exibir, sizeof(exibir), "%s", limpo);
+    }
+
+    g_formatando_placa = 1;
+    SetWindowText(hEdit, exibir);
+    SendMessage(hEdit, EM_SETSEL, (WPARAM)strlen(exibir), (LPARAM)strlen(exibir));
+    g_formatando_placa = 0;
+
+    SetDlgItemText(hwnd, IDC_STATIC_FORMATO_PLACA, rotulo);
 }
 
 static int criar_diretorios_para_arquivo(const char *caminho_arquivo)
@@ -303,6 +366,18 @@ static void carregar_lista_principal(HWND hwnd)
     HWND hList = GetDlgItem(hwnd, IDC_LISTVIEW_REGISTROS);
 
     GetWindowText(GetDlgItem(hwnd, IDC_EDIT_BUSCA), filtro, (int)sizeof(filtro));
+
+    /* Busca ignora hifen/espacos: o banco compara REPLACE(placa,'-','') */
+    {
+        int i;
+        int j = 0;
+        for (i = 0; filtro[i] != '\0'; i++)
+        {
+            if (filtro[i] != '-' && filtro[i] != ' ')
+                filtro[j++] = filtro[i];
+        }
+        filtro[j] = '\0';
+    }
 
     usar_ultimas = (Button_GetCheck(GetDlgItem(hwnd, IDC_RADIO_EXIBIR_ULTIMA)) == BST_CHECKED);
 
@@ -438,67 +513,6 @@ static void acao_ver_historico_por_placa(HWND hwnd)
     abrir_janela_historico(hwnd, placa);
 }
 
-static void acao_adicionar_tipo_oleo(HWND hwnd)
-{
-    char nome[50];
-
-    GetWindowText(GetDlgItem(hwnd, IDC_EDIT_NOVO_OLEO), nome, (int)sizeof(nome));
-    trim_texto(nome);
-
-    if (nome[0] == '\0')
-    {
-        mostrar_erro(hwnd, "Informe um nome para o novo tipo de oleo.");
-        SetFocus(GetDlgItem(hwnd, IDC_EDIT_NOVO_OLEO));
-        return;
-    }
-
-    if (db_adicionar_tipo_oleo(nome) != 0)
-    {
-        mostrar_erro(hwnd, "Nao foi possivel cadastrar o tipo de oleo (pode ja existir). ");
-        return;
-    }
-
-    SetWindowText(GetDlgItem(hwnd, IDC_EDIT_NOVO_OLEO), "");
-    recarregar_tipos_oleo(hwnd);
-    mostrar_sucesso(hwnd, "Novo tipo de oleo cadastrado com sucesso.");
-}
-
-static void acao_remover_tipo_oleo(HWND hwnd)
-{
-    char nome[50];
-    int count = 0;
-    TipoOleo *tipos;
-
-    if (!obter_nome_tipo_oleo_selecionado(nome, (int)sizeof(nome)))
-    {
-        mostrar_erro(hwnd, "Selecione um tipo de oleo para remover.");
-        return;
-    }
-
-    tipos = db_listar_tipos_oleo(&count);
-    db_liberar_tipos(tipos);
-
-    if (count <= 1)
-    {
-        mostrar_erro(hwnd, "Nao e permitido remover o ultimo tipo de oleo ativo.");
-        return;
-    }
-
-    if (!confirmar_acao(hwnd, "Remover o tipo de oleo selecionado?"))
-    {
-        return;
-    }
-
-    if (db_remover_tipo_oleo_por_nome(nome) != 0)
-    {
-        mostrar_erro(hwnd, "Nao foi possivel remover o tipo de oleo selecionado.");
-        return;
-    }
-
-    recarregar_tipos_oleo(hwnd);
-    mostrar_sucesso(hwnd, "Tipo de oleo removido com sucesso.");
-}
-
 LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam)
 {
     switch (msg)
@@ -567,17 +581,16 @@ LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam)
             }
             break;
 
+        case IDC_EDIT_PLACA:
+            if (HIWORD(wParam) == EN_CHANGE)
+            {
+                aplicar_mascara_placa(hwnd);
+            }
+            break;
+
         case IDC_BUTTON_VER_HISTORICO:
         case IDC_BUTTON_VER_HISTORICO_COMPLETO:
             acao_ver_historico_por_placa(hwnd);
-            break;
-
-        case IDC_BUTTON_ADICIONAR_OLEO:
-            acao_adicionar_tipo_oleo(hwnd);
-            break;
-
-        case IDC_BUTTON_REMOVER_OLEO:
-            acao_remover_tipo_oleo(hwnd);
             break;
 
         case IDM_CONFIG_BD:
@@ -668,11 +681,8 @@ LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam)
         }
 
         case IDM_CONFIG_OLEOS:
-            SetFocus(GetDlgItem(hwnd, IDC_EDIT_NOVO_OLEO));
-            MessageBox(hwnd,
-                       "Use os controles de gerencia de tipos na coluna direita (adicionar/remover).",
-                       "Tipos de Oleo",
-                       MB_OK | MB_ICONINFORMATION);
+            abrir_dialogo_tipos_oleo(hwnd);
+            recarregar_tipos_oleo(hwnd);
             break;
 
         case IDM_RELATORIO_GERAL:
@@ -700,10 +710,15 @@ LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam)
         return 0;
 
     case WM_SIZE:
+        if (wParam != SIZE_MINIMIZED)
+            redimensionar_controles(hwnd, LOWORD(lParam), HIWORD(lParam));
+        return 0;
+
+    case WM_GETMINMAXINFO:
     {
-        HWND hStatus = GetDlgItem(hwnd, IDC_STATUSBAR);
-        if (hStatus != NULL)
-            SendMessage(hStatus, WM_SIZE, wParam, lParam);
+        MINMAXINFO *mmi = (MINMAXINFO *)lParam;
+        mmi->ptMinTrackSize.x = 996;
+        mmi->ptMinTrackSize.y = 700;
         return 0;
     }
 
@@ -1019,8 +1034,12 @@ int APIENTRY WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLi
 
     while (GetMessage(&msg, NULL, 0, 0) > 0)
     {
-        TranslateMessage(&msg);
-        DispatchMessage(&msg);
+        /* Habilita navegacao por Tab/setas entre os controles */
+        if (!IsDialogMessage(hwnd, &msg))
+        {
+            TranslateMessage(&msg);
+            DispatchMessage(&msg);
+        }
     }
 
     return (int)msg.wParam;

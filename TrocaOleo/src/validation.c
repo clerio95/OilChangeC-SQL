@@ -47,7 +47,9 @@ static void trim_inplace(char *s)
 
 void normalizar_placa(char *placa)
 {
+    char limpo[16];
     size_t i;
+    size_t n = 0;
 
     if (placa == NULL)
     {
@@ -55,10 +57,36 @@ void normalizar_placa(char *placa)
     }
 
     trim_inplace(placa);
-    for (i = 0; placa[i] != '\0'; i++)
+
+    /* Mantem apenas letras e digitos, em maiusculas */
+    for (i = 0; placa[i] != '\0' && n < sizeof(limpo) - 1; i++)
     {
-        placa[i] = (char)toupper((unsigned char)placa[i]);
+        if (isalnum((unsigned char)placa[i]))
+        {
+            limpo[n++] = (char)toupper((unsigned char)placa[i]);
+        }
     }
+    limpo[n] = '\0';
+
+    /* Formato antigo digitado sem hifen: canonico e ABC-1234 */
+    if (n == 7 &&
+        isalpha((unsigned char)limpo[0]) &&
+        isalpha((unsigned char)limpo[1]) &&
+        isalpha((unsigned char)limpo[2]) &&
+        isdigit((unsigned char)limpo[3]) &&
+        isdigit((unsigned char)limpo[4]) &&
+        isdigit((unsigned char)limpo[5]) &&
+        isdigit((unsigned char)limpo[6]))
+    {
+        placa[0] = limpo[0];
+        placa[1] = limpo[1];
+        placa[2] = limpo[2];
+        placa[3] = '-';
+        memcpy(placa + 4, limpo + 3, 5);
+        return;
+    }
+
+    memcpy(placa, limpo, n + 1);
 }
 
 static int eh_mercosul(const char *p)

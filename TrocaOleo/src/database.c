@@ -80,6 +80,12 @@ static void preencher_troca_stmt(sqlite3_stmt *stmt, TrocaOleo *t)
     t->km_semanal_informado = sqlite3_column_int(stmt, 9);
     t->km_semanal           = sqlite3_column_int(stmt, 10);
     t->retorno_avisado      = sqlite3_column_int(stmt, 11);
+
+    s = sqlite3_column_text(stmt, 12);
+    if (s)
+        snprintf(t->data_consentimento, sizeof(t->data_consentimento), "%s", (const char *)s);
+
+    t->nao_contatar = sqlite3_column_int(stmt, 13);
 }
 
 static TrocaOleo *listar_trocas_por_sql(const char *sql, const char *filtro, int *count)
@@ -223,7 +229,9 @@ int db_criar_tabelas(void)
         "ativo INTEGER DEFAULT 1,"
         "km_semanal_informado INTEGER DEFAULT 0,"
         "km_semanal INTEGER DEFAULT 0,"
-        "retorno_avisado INTEGER DEFAULT 0"
+        "retorno_avisado INTEGER DEFAULT 0,"
+        "data_consentimento TEXT,"
+        "nao_contatar INTEGER DEFAULT 0"
         ");"
         "CREATE INDEX IF NOT EXISTS idx_placa ON trocas_oleo(placa);"
         "CREATE INDEX IF NOT EXISTS idx_data_troca ON trocas_oleo(data_troca DESC);"
@@ -279,6 +287,7 @@ int db_criar_tabelas(void)
         "  END AS oleo_vencido "
         "FROM ultimas_trocas t "
         "WHERE t.telefone_informado = 1 "
+        "  AND t.nao_contatar = 0 "
         "  AND t.retorno_avisado = 0;";
 
     char *err = NULL;
@@ -297,6 +306,17 @@ int db_criar_tabelas(void)
     add_column_if_missing("trocas_oleo", "km_semanal_informado", "INTEGER DEFAULT 0");
     add_column_if_missing("trocas_oleo", "km_semanal",           "INTEGER DEFAULT 0");
     add_column_if_missing("trocas_oleo", "retorno_avisado",      "INTEGER DEFAULT 0");
+    add_column_if_missing("trocas_oleo", "data_consentimento",   "TEXT");
+    add_column_if_missing("trocas_oleo", "nao_contatar",         "INTEGER DEFAULT 0");
+
+    /* Canonicaliza placas gravadas antes da mascara: maiusculas e placas
+       antigas sem hifen (ABC1234 -> ABC-1234), para que buscas e historico
+       por placa tratem as duas grafias como o mesmo veiculo */
+    sqlite3_exec(g_db,
+                 "UPDATE trocas_oleo SET placa = upper(placa) WHERE placa <> upper(placa);"
+                 "UPDATE trocas_oleo SET placa = substr(placa,1,3) || '-' || substr(placa,4) "
+                 "WHERE placa GLOB '[A-Z][A-Z][A-Z][0-9][0-9][0-9][0-9]';",
+                 NULL, NULL, NULL);
 
     /* Rebuild the contact view after migration so column references are valid */
     if (sqlite3_exec(g_db, sql_vista_contato, NULL, NULL, &err) != SQLITE_OK)
@@ -310,11 +330,20 @@ int db_criar_tabelas(void)
 
 int db_inserir_troca(const TrocaOleo *troca)
 {
+    /* data_consentimento registra QUANDO o cliente aceitou receber aviso (prova
+       exigida pela politica de opt-in do WhatsApp). O opt-out (nao_contatar) e
+       herdado de trocas anteriores do mesmo telefone para que um cliente que
+       pediu para nao ser contatado nao volte a receber aviso por engano. */
     const char *sql =
         "INSERT INTO trocas_oleo "
         "(placa, tipo_oleo, telefone, telefone_informado, veio_indicacao, data_troca, "
-        "km_semanal_informado, km_semanal) "
-        "VALUES (?, ?, ?, ?, ?, ?, ?, ?);";
+        "km_semanal_informado, km_semanal, data_consentimento, nao_contatar) "
+        "VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, "
+        "CASE WHEN ?4 = 1 THEN datetime('now','localtime') ELSE NULL END, "
+        "CASE WHEN ?9 = 1 THEN 1 "
+        "     WHEN ?3 <> '' AND EXISTS(SELECT 1 FROM trocas_oleo "
+        "                              WHERE telefone = ?3 AND nao_contatar = 1) THEN 1 "
+        "     ELSE 0 END);";
     sqlite3_stmt *stmt = NULL;
 
     if (g_db == NULL || troca == NULL)
@@ -331,6 +360,7 @@ int db_inserir_troca(const TrocaOleo *troca)
     sqlite3_bind_text(stmt, 6, troca->data_troca, -1, SQLITE_TRANSIENT);
     sqlite3_bind_int(stmt, 7, troca->km_semanal_informado);
     sqlite3_bind_int(stmt, 8, troca->km_semanal);
+    sqlite3_bind_int(stmt, 9, troca->nao_contatar);
 
     if (sqlite3_step(stmt) != SQLITE_DONE)
     {
@@ -346,9 +376,10 @@ TrocaOleo *db_listar_trocas(const char *filtro_placa, int *count)
 {
     const char *sql =
         "SELECT id, placa, tipo_oleo, telefone, telefone_informado, veio_indicacao, "
-        "data_troca, data_cadastro, ativo, km_semanal_informado, km_semanal, retorno_avisado "
+        "data_troca, data_cadastro, ativo, km_semanal_informado, km_semanal, retorno_avisado, "
+        "data_consentimento, nao_contatar "
         "FROM trocas_oleo "
-        "WHERE ativo = 1 AND placa LIKE ? "
+        "WHERE ativo = 1 AND REPLACE(placa, '-', '') LIKE ? "
         "ORDER BY data_troca DESC;";
 
     return listar_trocas_por_sql(sql, filtro_placa, count);
@@ -358,9 +389,10 @@ TrocaOleo *db_listar_ultimas_trocas(const char *filtro_placa, int *count)
 {
     const char *sql =
         "SELECT id, placa, tipo_oleo, telefone, telefone_informado, veio_indicacao, "
-        "data_troca, data_cadastro, ativo, km_semanal_informado, km_semanal, retorno_avisado "
+        "data_troca, data_cadastro, ativo, km_semanal_informado, km_semanal, retorno_avisado, "
+        "data_consentimento, nao_contatar "
         "FROM ultimas_trocas "
-        "WHERE placa LIKE ? "
+        "WHERE REPLACE(placa, '-', '') LIKE ? "
         "ORDER BY data_troca DESC;";
 
     return listar_trocas_por_sql(sql, filtro_placa, count);
@@ -368,11 +400,16 @@ TrocaOleo *db_listar_ultimas_trocas(const char *filtro_placa, int *count)
 
 int db_atualizar_troca(int id, const TrocaOleo *troca)
 {
+    /* Mantem o carimbo de consentimento original enquanto o consentimento
+       continuar marcado; desmarcar apaga o carimbo. */
     const char *sql =
         "UPDATE trocas_oleo "
-        "SET placa=?, tipo_oleo=?, telefone=?, telefone_informado=?, veio_indicacao=?, "
-        "data_troca=?, km_semanal_informado=?, km_semanal=? "
-        "WHERE id=?;";
+        "SET placa=?1, tipo_oleo=?2, telefone=?3, telefone_informado=?4, veio_indicacao=?5, "
+        "data_troca=?6, km_semanal_informado=?7, km_semanal=?8, "
+        "data_consentimento = CASE WHEN ?4 = 1 "
+        "  THEN COALESCE(data_consentimento, datetime('now','localtime')) ELSE NULL END, "
+        "nao_contatar=?9 "
+        "WHERE id=?10;";
     sqlite3_stmt *stmt = NULL;
 
     if (g_db == NULL || troca == NULL)
@@ -389,7 +426,8 @@ int db_atualizar_troca(int id, const TrocaOleo *troca)
     sqlite3_bind_text(stmt, 6, troca->data_troca, -1, SQLITE_TRANSIENT);
     sqlite3_bind_int(stmt, 7, troca->km_semanal_informado);
     sqlite3_bind_int(stmt, 8, troca->km_semanal);
-    sqlite3_bind_int(stmt, 9, id);
+    sqlite3_bind_int(stmt, 9, troca->nao_contatar);
+    sqlite3_bind_int(stmt, 10, id);
 
     if (sqlite3_step(stmt) != SQLITE_DONE)
     {
@@ -398,6 +436,24 @@ int db_atualizar_troca(int id, const TrocaOleo *troca)
     }
 
     sqlite3_finalize(stmt);
+
+    /* Edicao explicita expressa a vontade atual do cliente: propaga o opt-out
+       (ou a re-autorizacao) para todas as trocas do mesmo telefone, senao uma
+       troca antiga com nao_contatar=1 reativaria o bloqueio no proximo INSERT */
+    if (troca->telefone[0] != '\0')
+    {
+        sqlite3_stmt *prop = NULL;
+        if (sqlite3_prepare_v2(g_db,
+                "UPDATE trocas_oleo SET nao_contatar=?1 WHERE telefone=?2;",
+                -1, &prop, NULL) == SQLITE_OK)
+        {
+            sqlite3_bind_int(prop, 1, troca->nao_contatar);
+            sqlite3_bind_text(prop, 2, troca->telefone, -1, SQLITE_TRANSIENT);
+            sqlite3_step(prop);
+            sqlite3_finalize(prop);
+        }
+    }
+
     return 0;
 }
 
@@ -432,7 +488,8 @@ TrocaOleo *db_buscar_troca_por_id(int id)
 {
     const char *sql =
         "SELECT id, placa, tipo_oleo, telefone, telefone_informado, veio_indicacao, "
-        "data_troca, data_cadastro, ativo, km_semanal_informado, km_semanal, retorno_avisado "
+        "data_troca, data_cadastro, ativo, km_semanal_informado, km_semanal, retorno_avisado, "
+        "data_consentimento, nao_contatar "
         "FROM trocas_oleo WHERE id = ?;";
     sqlite3_stmt *stmt = NULL;
     TrocaOleo *out;
@@ -471,7 +528,8 @@ TrocaOleo *db_historico_por_placa(const char *placa, int *count)
 {
     const char *sql =
         "SELECT id, placa, tipo_oleo, telefone, telefone_informado, veio_indicacao, "
-        "data_troca, data_cadastro, ativo, km_semanal_informado, km_semanal, retorno_avisado "
+        "data_troca, data_cadastro, ativo, km_semanal_informado, km_semanal, retorno_avisado, "
+        "data_consentimento, nao_contatar "
         "FROM trocas_oleo WHERE ativo=1 AND placa=? ORDER BY data_troca DESC;";
     sqlite3_stmt *stmt = NULL;
     TrocaOleo *lista = NULL;
@@ -1006,6 +1064,38 @@ int db_puxar_retorno_avisado(const char *network_path)
     }
 
     sqlite3_finalize(upd);
+
+    /* Opt-outs gravados pelo script na replica de rede valem para o cliente
+       (telefone) inteiro, nao so para uma troca. O prepare na replica falha
+       sem efeito se ela ainda nao tiver a coluna nao_contatar. */
+    {
+        sqlite3_stmt *sel_opt = NULL;
+        sqlite3_stmt *upd_opt = NULL;
+
+        if (sqlite3_prepare_v2(g_db,
+                "UPDATE trocas_oleo SET nao_contatar=1 WHERE telefone=? AND nao_contatar=0;",
+                -1, &upd_opt, NULL) == SQLITE_OK)
+        {
+            if (sqlite3_prepare_v2(rede,
+                    "SELECT DISTINCT telefone FROM trocas_oleo "
+                    "WHERE nao_contatar=1 AND telefone <> '';",
+                    -1, &sel_opt, NULL) == SQLITE_OK)
+            {
+                while (sqlite3_step(sel_opt) == SQLITE_ROW)
+                {
+                    const unsigned char *tel = sqlite3_column_text(sel_opt, 0);
+                    if (tel == NULL)
+                        continue;
+                    sqlite3_bind_text(upd_opt, 1, (const char *)tel, -1, SQLITE_TRANSIENT);
+                    sqlite3_step(upd_opt);
+                    sqlite3_reset(upd_opt);
+                }
+                sqlite3_finalize(sel_opt);
+            }
+            sqlite3_finalize(upd_opt);
+        }
+    }
+
     sqlite3_close(rede);
     return 0;
 }

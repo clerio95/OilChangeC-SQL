@@ -6,12 +6,14 @@
 
 #define IDC_EDIT_PLACA 1001
 #define IDC_BUTTON_VER_HISTORICO 1002
+#define IDC_STATIC_FORMATO_PLACA 1003
 #define IDC_RADIO_OLEO_BASE 1100
 #define IDC_CHECK_TELEFONE 1200
 #define IDC_EDIT_TELEFONE 1201
 #define IDC_CHECK_INDICACAO 1202
 #define IDC_CHECK_KM_SEMANAL 1203
 #define IDC_EDIT_KM_SEMANAL 1204
+#define IDC_CHECK_NAO_CONTATAR 1205
 #define IDC_DATETIME_TROCA 1300
 #define IDC_BUTTON_SALVAR 1400
 #define IDC_BUTTON_ATUALIZAR 1401
@@ -27,7 +29,11 @@
 #define IDC_EDIT_NOVO_OLEO 1700
 #define IDC_BUTTON_ADICIONAR_OLEO 1701
 #define IDC_BUTTON_REMOVER_OLEO 1702
+#define IDC_LIST_TIPOS_OLEO 1703
+#define IDC_BUTTON_FECHAR_OLEOS 1704
 #define IDC_STATUSBAR 1800
+#define IDC_GROUP_CADASTRO 1900
+#define IDC_GROUP_REGISTROS 1901
 
 #define IDM_CONFIG_BD 2001
 #define IDM_CONFIG_OLEOS 2002
@@ -40,8 +46,10 @@
 
 HWND criar_janela_principal(HINSTANCE hInstance, int nCmdShow);
 void criar_controles(HWND hwnd);
+void redimensionar_controles(HWND hwnd, int cx, int cy);
 void criar_radio_buttons_oleo(HWND hwnd, TipoOleo *tipos, int count);
 void recarregar_tipos_oleo(HWND hwnd);
+void abrir_dialogo_tipos_oleo(HWND hwndParent);
 
 void limpar_formulario(HWND hwnd);
 void preencher_formulario(HWND hwnd, const TrocaOleo *troca);
@@ -50,7 +58,6 @@ TrocaOleo obter_dados_formulario(HWND hwnd);
 void atualizar_listview(HWND hwndList, TrocaOleo *trocas, int count);
 TrocaOleo *obter_item_selecionado(HWND hwndList);
 int obter_id_item_selecionado(HWND hwndList);
-int obter_nome_tipo_oleo_selecionado(char *nome, int nome_size);
 
 void abrir_janela_historico(HWND hwndParent, const char *placa);
 void abrir_janela_relatorio_geral(HWND hwndParent);

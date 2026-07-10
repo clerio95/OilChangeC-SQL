@@ -18,6 +18,8 @@ typedef struct
     int km_semanal_informado;
     int km_semanal;
     int retorno_avisado;
+    char data_consentimento[20]; /* quando o cliente aceitou receber aviso; vazio = sem consentimento */
+    int nao_contatar;            /* cliente pediu para nao receber aviso (opt-out) */
 } TrocaOleo;
 
 typedef struct
