@@ -244,6 +244,47 @@ static void aplicar_mascara_placa(HWND hwnd)
     SetDlgItemText(hwnd, IDC_STATIC_FORMATO_PLACA, rotulo);
 }
 
+/* Autofill: em cadastro novo, quando a placa esta completa e o telefone ainda
+   vazio, preenche com o numero da ultima troca da placa. O consentimento NAO
+   e pre-marcado — o aceite e confirmado com o cliente a cada visita. Numero
+   bloqueado (opt-out/lista de supressao) pre-marca "Pediu para NAO contatar". */
+static void autofill_telefone_por_placa(HWND hwnd)
+{
+    char placa[16];
+    char telefone[20];
+    char atual[32];
+    int suprimido = 0;
+
+    if (g_edit_id > 0)
+    {
+        return; /* editando registro existente */
+    }
+
+    GetWindowText(GetDlgItem(hwnd, IDC_EDIT_TELEFONE), atual, (int)sizeof(atual));
+    if (atual[0] != '\0')
+    {
+        return; /* nao sobrescrever o que o operador digitou */
+    }
+
+    GetWindowText(GetDlgItem(hwnd, IDC_EDIT_PLACA), placa, (int)sizeof(placa));
+    normalizar_placa(placa);
+    if (validar_placa(placa) == PLACA_INVALIDA)
+    {
+        return;
+    }
+
+    if (db_telefone_recente_por_placa(placa, telefone, sizeof(telefone), &suprimido) != 1)
+    {
+        return;
+    }
+
+    SetWindowText(GetDlgItem(hwnd, IDC_EDIT_TELEFONE), telefone);
+    if (suprimido)
+    {
+        Button_SetCheck(GetDlgItem(hwnd, IDC_CHECK_NAO_CONTATAR), BST_CHECKED);
+    }
+}
+
 static int criar_diretorios_para_arquivo(const char *caminho_arquivo)
 {
     wchar_t wpasta[MAX_PATH];
@@ -584,7 +625,17 @@ LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam)
         case IDC_EDIT_PLACA:
             if (HIWORD(wParam) == EN_CHANGE)
             {
-                aplicar_mascara_placa(hwnd);
+                /* O SetWindowText da mascara reentra aqui com o guard ativo;
+                   so o EN_CHANGE original dispara o autofill */
+                if (!g_formatando_placa)
+                {
+                    aplicar_mascara_placa(hwnd);
+                    autofill_telefone_por_placa(hwnd);
+                }
+            }
+            else if (HIWORD(wParam) == EN_KILLFOCUS)
+            {
+                autofill_telefone_por_placa(hwnd);
             }
             break;
 
@@ -1016,6 +1067,10 @@ int APIENTRY WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLi
         if (g_config.caminho_rede[0] != '\0')
             g_startup_pull_rc = db_puxar_retorno_avisado(g_config.caminho_rede);
     }
+
+    /* LGPD: expurgo na inicializacao — apaga de vez exclusoes com mais de 30
+       dias e anonimiza telefones de trocas alem do prazo de retencao. */
+    db_expurgar_dados_pessoais(g_config.retencao_meses, 30);
 
     hwnd = criar_janela_principal(hInstance, nCmdShow);
     if (hwnd == NULL)

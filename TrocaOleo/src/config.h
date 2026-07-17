@@ -9,8 +9,7 @@ typedef struct
     char caminho_rede[MAX_PATH];  /* network sync path (optional replica) */
     char tema[20];
     int fonte_tamanho;
-    int auto_backup;
-    char pasta_backup[MAX_PATH];
+    int retencao_meses; /* LGPD: telefone anonimizado apos N meses (0 desativa) */
 } Config;
 
 int config_carregar(const char *config_path, Config *config); /* 0=ok, 1=not found, -1=error */

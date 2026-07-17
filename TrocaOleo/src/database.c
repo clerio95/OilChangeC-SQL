@@ -231,7 +231,9 @@ int db_criar_tabelas(void)
         "km_semanal INTEGER DEFAULT 0,"
         "retorno_avisado INTEGER DEFAULT 0,"
         "data_consentimento TEXT,"
-        "nao_contatar INTEGER DEFAULT 0"
+        "nao_contatar INTEGER DEFAULT 0,"
+        "data_revogacao TEXT,"
+        "data_exclusao TEXT"
         ");"
         "CREATE INDEX IF NOT EXISTS idx_placa ON trocas_oleo(placa);"
         "CREATE INDEX IF NOT EXISTS idx_data_troca ON trocas_oleo(data_troca DESC);"
@@ -267,14 +269,35 @@ int db_criar_tabelas(void)
         ");"
 
         "INSERT OR IGNORE INTO configuracoes (chave, valor) VALUES "
-        "('caminho_bd', 'C:\\\\TrocaOleo\\\\dados.db');";
+        "('caminho_bd', 'C:\\\\TrocaOleo\\\\dados.db');"
+
+        /* Registro de eventos de consentimento (LGPD Art. 8): revogacao e um
+           EVENTO, nao apaga a prova do consentimento anterior. Somente INSERT. */
+        "CREATE TABLE IF NOT EXISTS consentimento_log ("
+        "id INTEGER PRIMARY KEY AUTOINCREMENT,"
+        "troca_id INTEGER,"
+        "telefone TEXT NOT NULL,"
+        "evento TEXT NOT NULL," /* concedido | revogado | optout | optout_removido */
+        "origem TEXT NOT NULL," /* balcao | whatsapp */
+        "versao_termo TEXT,"
+        "data_evento TEXT DEFAULT (datetime('now','localtime'))"
+        ");"
+
+        /* Lista de supressao: guarda apenas o numero de quem pediu opt-out
+           depois que as trocas dele forem expurgadas, para nunca recontatar. */
+        "CREATE TABLE IF NOT EXISTS telefones_suprimidos ("
+        "telefone TEXT PRIMARY KEY,"
+        "data_registro TEXT DEFAULT (datetime('now','localtime'))"
+        ");";
 
     /* clientes_para_contato: rebuilt every startup so the definition stays current.
-       Third-party script queries: SELECT * FROM clientes_para_contato WHERE oleo_vencido=1 */
+       Third-party script queries: SELECT * FROM clientes_para_contato WHERE oleo_vencido=1
+       Colunas explicitas (LGPD Art. 6-III): expoe so o necessario para o aviso,
+       nada de veio_indicacao/data_cadastro/retorno_avisado. */
     const char *sql_vista_contato =
         "DROP VIEW IF EXISTS clientes_para_contato;"
         "CREATE VIEW clientes_para_contato AS "
-        "SELECT t.*, "
+        "SELECT t.id, t.placa, t.telefone, t.data_troca, t.data_consentimento, "
         "  CAST(julianday('now') - julianday(t.data_troca) AS INTEGER) AS dias_desde_troca, "
         "  CASE "
         "    WHEN t.km_semanal_informado = 1 AND t.km_semanal > 0 "
@@ -308,6 +331,8 @@ int db_criar_tabelas(void)
     add_column_if_missing("trocas_oleo", "retorno_avisado",      "INTEGER DEFAULT 0");
     add_column_if_missing("trocas_oleo", "data_consentimento",   "TEXT");
     add_column_if_missing("trocas_oleo", "nao_contatar",         "INTEGER DEFAULT 0");
+    add_column_if_missing("trocas_oleo", "data_revogacao",       "TEXT");
+    add_column_if_missing("trocas_oleo", "data_exclusao",        "TEXT");
 
     /* Canonicaliza placas gravadas antes da mascara: maiusculas e placas
        antigas sem hifen (ABC1234 -> ABC-1234), para que buscas e historico
@@ -328,12 +353,38 @@ int db_criar_tabelas(void)
     return 0;
 }
 
+/* Anexa um evento ao consentimento_log (LGPD Art. 8: prova de consentimento
+   e de revogacao como eventos, nunca sobrescrevendo o historico). */
+static void log_consentimento(int troca_id, const char *telefone,
+                              const char *evento, const char *origem)
+{
+    const char *sql =
+        "INSERT INTO consentimento_log (troca_id, telefone, evento, origem, versao_termo) "
+        "VALUES (?1, ?2, ?3, ?4, CASE WHEN ?3 = 'concedido' THEN ?5 ELSE NULL END);";
+    sqlite3_stmt *stmt = NULL;
+
+    if (g_db == NULL || telefone == NULL || telefone[0] == '\0')
+        return;
+
+    if (sqlite3_prepare_v2(g_db, sql, -1, &stmt, NULL) != SQLITE_OK)
+        return;
+
+    sqlite3_bind_int(stmt, 1, troca_id);
+    sqlite3_bind_text(stmt, 2, telefone, -1, SQLITE_TRANSIENT);
+    sqlite3_bind_text(stmt, 3, evento, -1, SQLITE_TRANSIENT);
+    sqlite3_bind_text(stmt, 4, origem, -1, SQLITE_TRANSIENT);
+    sqlite3_bind_text(stmt, 5, LGPD_VERSAO_TERMO, -1, SQLITE_STATIC);
+    sqlite3_step(stmt);
+    sqlite3_finalize(stmt);
+}
+
 int db_inserir_troca(const TrocaOleo *troca)
 {
     /* data_consentimento registra QUANDO o cliente aceitou receber aviso (prova
        exigida pela politica de opt-in do WhatsApp). O opt-out (nao_contatar) e
-       herdado de trocas anteriores do mesmo telefone para que um cliente que
-       pediu para nao ser contatado nao volte a receber aviso por engano. */
+       herdado de trocas anteriores do mesmo telefone — e da lista de supressao,
+       que sobrevive ao expurgo — para que um cliente que pediu para nao ser
+       contatado nao volte a receber aviso por engano. */
     const char *sql =
         "INSERT INTO trocas_oleo "
         "(placa, tipo_oleo, telefone, telefone_informado, veio_indicacao, data_troca, "
@@ -341,8 +392,10 @@ int db_inserir_troca(const TrocaOleo *troca)
         "VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, "
         "CASE WHEN ?4 = 1 THEN datetime('now','localtime') ELSE NULL END, "
         "CASE WHEN ?9 = 1 THEN 1 "
-        "     WHEN ?3 <> '' AND EXISTS(SELECT 1 FROM trocas_oleo "
-        "                              WHERE telefone = ?3 AND nao_contatar = 1) THEN 1 "
+        "     WHEN ?3 <> '' AND (EXISTS(SELECT 1 FROM trocas_oleo "
+        "                               WHERE telefone = ?3 AND nao_contatar = 1) "
+        "                        OR EXISTS(SELECT 1 FROM telefones_suprimidos "
+        "                                  WHERE telefone = ?3)) THEN 1 "
         "     ELSE 0 END);";
     sqlite3_stmt *stmt = NULL;
 
@@ -369,6 +422,13 @@ int db_inserir_troca(const TrocaOleo *troca)
     }
 
     sqlite3_finalize(stmt);
+
+    if (troca->telefone_informado)
+    {
+        log_consentimento((int)sqlite3_last_insert_rowid(g_db),
+                          troca->telefone, "concedido", "balcao");
+    }
+
     return 0;
 }
 
@@ -400,20 +460,52 @@ TrocaOleo *db_listar_ultimas_trocas(const char *filtro_placa, int *count)
 
 int db_atualizar_troca(int id, const TrocaOleo *troca)
 {
-    /* Mantem o carimbo de consentimento original enquanto o consentimento
-       continuar marcado; desmarcar apaga o carimbo. */
+    /* Desmarcar o consentimento NAO apaga data_consentimento (a prova do
+       consentimento passado); a revogacao vira carimbo em data_revogacao.
+       Um novo aceite (apos revogacao ou apos remover o opt-out) ganha carimbo
+       novo — e o que reautoriza o envio depois de um SAIR no WhatsApp. */
     const char *sql =
         "UPDATE trocas_oleo "
         "SET placa=?1, tipo_oleo=?2, telefone=?3, telefone_informado=?4, veio_indicacao=?5, "
         "data_troca=?6, km_semanal_informado=?7, km_semanal=?8, "
-        "data_consentimento = CASE WHEN ?4 = 1 "
-        "  THEN COALESCE(data_consentimento, datetime('now','localtime')) ELSE NULL END, "
+        "data_consentimento = CASE "
+        "  WHEN ?4 = 0 THEN data_consentimento "
+        "  WHEN data_consentimento IS NULL THEN datetime('now','localtime') "
+        "  WHEN data_revogacao IS NOT NULL THEN datetime('now','localtime') "
+        "  WHEN nao_contatar = 1 AND ?9 = 0 THEN datetime('now','localtime') "
+        "  ELSE data_consentimento END, "
+        "data_revogacao = CASE "
+        "  WHEN ?4 = 1 THEN NULL "
+        "  WHEN telefone_informado = 1 AND data_revogacao IS NULL "
+        "    THEN datetime('now','localtime') "
+        "  ELSE data_revogacao END, "
         "nao_contatar=?9 "
         "WHERE id=?10;";
     sqlite3_stmt *stmt = NULL;
+    int old_ti = 0;
+    int old_nc = 0;
+    int tem_antigo = 0;
 
     if (g_db == NULL || troca == NULL)
         return -1;
+
+    /* Estado anterior, para registrar as transicoes no consentimento_log */
+    {
+        sqlite3_stmt *sel = NULL;
+        if (sqlite3_prepare_v2(g_db,
+                "SELECT telefone_informado, nao_contatar FROM trocas_oleo WHERE id=?;",
+                -1, &sel, NULL) == SQLITE_OK)
+        {
+            sqlite3_bind_int(sel, 1, id);
+            if (sqlite3_step(sel) == SQLITE_ROW)
+            {
+                old_ti = sqlite3_column_int(sel, 0);
+                old_nc = sqlite3_column_int(sel, 1);
+                tem_antigo = 1;
+            }
+            sqlite3_finalize(sel);
+        }
+    }
 
     if (sqlite3_prepare_v2(g_db, sql, -1, &stmt, NULL) != SQLITE_OK)
         return -1;
@@ -437,9 +529,26 @@ int db_atualizar_troca(int id, const TrocaOleo *troca)
 
     sqlite3_finalize(stmt);
 
+    if (tem_antigo && troca->telefone[0] != '\0')
+    {
+        if (old_ti == 0 && troca->telefone_informado == 1)
+            log_consentimento(id, troca->telefone, "concedido", "balcao");
+        else if (old_ti == 1 && troca->telefone_informado == 0)
+            log_consentimento(id, troca->telefone, "revogado", "balcao");
+        else if (old_nc == 1 && troca->nao_contatar == 0 && troca->telefone_informado == 1)
+            /* Remover o opt-out com consentimento marcado = novo aceite no balcao */
+            log_consentimento(id, troca->telefone, "concedido", "balcao");
+
+        if (old_nc == 0 && troca->nao_contatar == 1)
+            log_consentimento(id, troca->telefone, "optout", "balcao");
+        else if (old_nc == 1 && troca->nao_contatar == 0)
+            log_consentimento(id, troca->telefone, "optout_removido", "balcao");
+    }
+
     /* Edicao explicita expressa a vontade atual do cliente: propaga o opt-out
        (ou a re-autorizacao) para todas as trocas do mesmo telefone, senao uma
-       troca antiga com nao_contatar=1 reativaria o bloqueio no proximo INSERT */
+       troca antiga com nao_contatar=1 reativaria o bloqueio no proximo INSERT.
+       A re-autorizacao tambem sai da lista de supressao. */
     if (troca->telefone[0] != '\0')
     {
         sqlite3_stmt *prop = NULL;
@@ -452,6 +561,18 @@ int db_atualizar_troca(int id, const TrocaOleo *troca)
             sqlite3_step(prop);
             sqlite3_finalize(prop);
         }
+
+        if (troca->nao_contatar == 0)
+        {
+            if (sqlite3_prepare_v2(g_db,
+                    "DELETE FROM telefones_suprimidos WHERE telefone=?1;",
+                    -1, &prop, NULL) == SQLITE_OK)
+            {
+                sqlite3_bind_text(prop, 1, troca->telefone, -1, SQLITE_TRANSIENT);
+                sqlite3_step(prop);
+                sqlite3_finalize(prop);
+            }
+        }
     }
 
     return 0;
@@ -459,7 +580,11 @@ int db_atualizar_troca(int id, const TrocaOleo *troca)
 
 int db_deletar_troca(int id)
 {
-    const char *sql = "UPDATE trocas_oleo SET ativo=0 WHERE id=?;";
+    /* Soft delete com carimbo: data_exclusao inicia o prazo de carencia apos
+       o qual db_expurgar_dados_pessoais apaga a linha fisicamente. */
+    const char *sql =
+        "UPDATE trocas_oleo SET ativo=0, "
+        "data_exclusao=datetime('now','localtime') WHERE id=?;";
     sqlite3_stmt *stmt = NULL;
 
     if (g_db == NULL)
@@ -522,6 +647,61 @@ TrocaOleo *db_buscar_troca_por_id(int id)
     preencher_troca_stmt(stmt, out);
     sqlite3_finalize(stmt);
     return out;
+}
+
+int db_telefone_recente_por_placa(const char *placa, char *telefone, size_t tam, int *suprimido)
+{
+    const char *sql =
+        "SELECT t.telefone, "
+        "EXISTS(SELECT 1 FROM telefones_suprimidos s WHERE s.telefone = t.telefone) "
+        "OR EXISTS(SELECT 1 FROM trocas_oleo x "
+        "          WHERE x.telefone = t.telefone AND x.nao_contatar = 1) "
+        "FROM trocas_oleo t "
+        "WHERE t.ativo = 1 AND t.placa = ? "
+        "AND t.telefone_informado = 1 AND t.telefone <> '' "
+        "ORDER BY t.data_troca DESC, t.id DESC LIMIT 1;";
+    sqlite3_stmt *stmt = NULL;
+    int rc;
+    int achou = 0;
+
+    if (g_db == NULL || placa == NULL || telefone == NULL || tam == 0)
+    {
+        return -1;
+    }
+
+    telefone[0] = '\0';
+    if (suprimido != NULL)
+    {
+        *suprimido = 0;
+    }
+
+    if (sqlite3_prepare_v2(g_db, sql, -1, &stmt, NULL) != SQLITE_OK)
+    {
+        return -1;
+    }
+
+    sqlite3_bind_text(stmt, 1, placa, -1, SQLITE_TRANSIENT);
+
+    rc = sqlite3_step(stmt);
+    if (rc == SQLITE_ROW)
+    {
+        const unsigned char *tel = sqlite3_column_text(stmt, 0);
+        snprintf(telefone, tam, "%s", (tel != NULL) ? (const char *)tel : "");
+        if (suprimido != NULL)
+        {
+            *suprimido = sqlite3_column_int(stmt, 1);
+        }
+        achou = 1;
+    }
+
+    sqlite3_finalize(stmt);
+
+    if (rc != SQLITE_ROW && rc != SQLITE_DONE)
+    {
+        return -1;
+    }
+
+    return achou;
 }
 
 TrocaOleo *db_historico_por_placa(const char *placa, int *count)
@@ -983,6 +1163,74 @@ int db_remover_tipo_oleo_por_nome(const char *nome)
     return 0;
 }
 
+int db_expurgar_dados_pessoais(int retencao_meses, int carencia_dias)
+{
+    /* LGPD Art. 15/16: exclusao passa a ser real. Roda na inicializacao.
+       1. Linhas com ativo=0 ha mais de carencia_dias sao apagadas de vez
+          (a carencia protege contra exclusao acidental no balcao).
+       2. Trocas mais antigas que retencao_meses perdem o telefone e os dados
+          de consentimento (anonimizacao); placa/tipo/data ficam para o
+          historico de manutencao do veiculo.
+       Antes de apagar um numero com opt-out, ele entra em telefones_suprimidos
+       para que o bloqueio de contato sobreviva ao expurgo.
+       A replica de rede converge no proximo sync (backup integral). */
+    char sql[1024];
+    char *err = NULL;
+
+    if (g_db == NULL)
+        return -1;
+    if (carencia_dias < 0)
+        carencia_dias = 0;
+
+    if (sqlite3_exec(g_db, "BEGIN;", NULL, NULL, NULL) != SQLITE_OK)
+        return -1;
+
+    /* Linhas excluidas antes da coluna data_exclusao existir: o prazo de
+       carencia delas comeca a contar agora */
+    sqlite3_exec(g_db,
+                 "UPDATE trocas_oleo SET data_exclusao = datetime('now','localtime') "
+                 "WHERE ativo = 0 AND data_exclusao IS NULL;",
+                 NULL, NULL, NULL);
+
+    snprintf(sql, sizeof(sql),
+             "INSERT OR IGNORE INTO telefones_suprimidos (telefone) "
+             "SELECT DISTINCT telefone FROM trocas_oleo "
+             "WHERE nao_contatar = 1 AND telefone <> '' "
+             "  AND ((ativo = 0 AND data_exclusao <= datetime('now','localtime','-%d days')) "
+             "       OR (%d > 0 AND data_troca <= date('now','localtime','-%d months')));",
+             carencia_dias, retencao_meses, retencao_meses);
+    sqlite3_exec(g_db, sql, NULL, NULL, NULL);
+
+    snprintf(sql, sizeof(sql),
+             "DELETE FROM trocas_oleo "
+             "WHERE ativo = 0 "
+             "  AND data_exclusao <= datetime('now','localtime','-%d days');",
+             carencia_dias);
+    sqlite3_exec(g_db, sql, NULL, NULL, NULL);
+
+    if (retencao_meses > 0)
+    {
+        snprintf(sql, sizeof(sql),
+                 "UPDATE trocas_oleo "
+                 "SET telefone = '', telefone_informado = 0, data_consentimento = NULL, "
+                 "    data_revogacao = NULL, nao_contatar = 0 "
+                 "WHERE telefone <> '' "
+                 "  AND data_troca <= date('now','localtime','-%d months');",
+                 retencao_meses);
+        sqlite3_exec(g_db, sql, NULL, NULL, NULL);
+    }
+
+    if (sqlite3_exec(g_db, "COMMIT;", NULL, NULL, &err) != SQLITE_OK)
+    {
+        if (err)
+            sqlite3_free(err);
+        sqlite3_exec(g_db, "ROLLBACK;", NULL, NULL, NULL);
+        return -1;
+    }
+
+    return 0;
+}
+
 int db_sincronizar_para_rede(const char *network_path)
 {
     wchar_t wpath[MAX_PATH];
@@ -1088,6 +1336,8 @@ int db_puxar_retorno_avisado(const char *network_path)
                         continue;
                     sqlite3_bind_text(upd_opt, 1, (const char *)tel, -1, SQLITE_TRANSIENT);
                     sqlite3_step(upd_opt);
+                    if (sqlite3_changes(g_db) > 0)
+                        log_consentimento(0, (const char *)tel, "optout", "whatsapp");
                     sqlite3_reset(upd_opt);
                 }
                 sqlite3_finalize(sel_opt);

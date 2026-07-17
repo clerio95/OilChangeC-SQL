@@ -14,8 +14,7 @@ static void config_defaults(Config *config)
     config->caminho_rede[0] = '\0';
     snprintf(config->tema, sizeof(config->tema), "claro");
     config->fonte_tamanho = 10;
-    config->auto_backup = 1;
-    snprintf(config->pasta_backup, sizeof(config->pasta_backup), "C:\\TrocaOleo\\Backups");
+    config->retencao_meses = 24;
 }
 
 static void trim_line(char *line)
@@ -72,13 +71,9 @@ int config_carregar(const char *config_path, Config *config)
         {
             config->fonte_tamanho = atoi(line + 14);
         }
-        else if (strncmp(line, "auto_backup=", 12) == 0)
+        else if (strncmp(line, "retencao_meses=", 15) == 0)
         {
-            config->auto_backup = atoi(line + 12);
-        }
-        else if (strncmp(line, "pasta_backup=", 13) == 0)
-        {
-            snprintf(config->pasta_backup, sizeof(config->pasta_backup), "%s", line + 13);
+            config->retencao_meses = atoi(line + 15);
         }
     }
 
@@ -109,9 +104,8 @@ int config_salvar(const char *config_path, const Config *config)
     fprintf(f, "tema=%s\n", config->tema);
     fprintf(f, "fonte_tamanho=%d\n\n", config->fonte_tamanho);
 
-    fprintf(f, "[Backup]\n");
-    fprintf(f, "auto_backup=%d\n", config->auto_backup);
-    fprintf(f, "pasta_backup=%s\n", config->pasta_backup);
+    fprintf(f, "[LGPD]\n");
+    fprintf(f, "retencao_meses=%d\n", config->retencao_meses);
 
     fclose(f);
     return 0;

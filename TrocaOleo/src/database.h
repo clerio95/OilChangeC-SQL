@@ -4,6 +4,10 @@
 #include <stddef.h>
 #include "../include/sqlite3.h"
 
+/* Versao do termo de consentimento gravada no consentimento_log (LGPD Art. 8).
+   Atualize quando o texto de AVISO_PRIVACIDADE.md mudar. */
+#define LGPD_VERSAO_TERMO "2026-07-17"
+
 typedef struct
 {
     int id;
@@ -40,6 +44,12 @@ int db_deletar_troca(int id);
 int db_marcar_retorno_avisado(int id);
 TrocaOleo *db_buscar_troca_por_id(int id);
 
+/* Autofill do balcao: telefone da troca ativa mais recente da placa.
+   Retorna 1 se encontrou (telefone preenchido), 0 se nao ha, -1 em erro.
+   *suprimido recebe 1 quando o numero esta com opt-out vigente ou na lista
+   de supressao — a GUI pre-marca "Pediu para NAO contatar". */
+int db_telefone_recente_por_placa(const char *placa, char *telefone, size_t tam, int *suprimido);
+
 TrocaOleo *db_historico_por_placa(const char *placa, int *count);
 int db_contar_trocas_por_placa(const char *placa);
 char *db_tipo_oleo_mais_usado(const char *placa);
@@ -55,6 +65,11 @@ TipoOleo *db_listar_tipos_oleo(int *count);
 int db_adicionar_tipo_oleo(const char *nome);
 int db_remover_tipo_oleo(int id);
 int db_remover_tipo_oleo_por_nome(const char *nome);
+
+/* LGPD: apaga fisicamente registros excluidos ha mais de carencia_dias e
+   anonimiza o telefone de trocas mais antigas que retencao_meses (0 desativa
+   a anonimizacao). Numeros com opt-out vao antes para telefones_suprimidos. */
+int db_expurgar_dados_pessoais(int retencao_meses, int carencia_dias);
 
 /* Network sync */
 int db_sincronizar_para_rede(const char *network_path);
